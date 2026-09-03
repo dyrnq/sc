@@ -48,8 +48,7 @@ pub fn env_password(method: ProxyMethod, _socks_version: u8) -> Option<String> {
 }
 
 /// Read a password: env vars first, then `SSH_ASKPASS` (Phase 6), then
-/// `/dev/tty` (Phase 5). Phase 4 only handles env vars; the others return
-/// `Todo`.
+/// `/dev/tty` (Phase 5).
 pub fn readpass(prompt: &str, method: ProxyMethod, socks_version: u8) -> Result<String> {
     if let Some(p) = env_password(method, socks_version) {
         return Ok(p);
@@ -57,8 +56,7 @@ pub fn readpass(prompt: &str, method: ProxyMethod, socks_version: u8) -> Result<
     if std::env::var("SSH_ASKPASS").is_ok() {
         return Err(Error::Todo("readpass via SSH_ASKPASS (Phase 6)"));
     }
-    let _ = prompt;
-    Err(Error::Todo("readpass via /dev/tty (Phase 5)"))
+    crate::tty::tty_readpass(prompt)
 }
 
 #[cfg(unix)]
