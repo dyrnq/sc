@@ -54,14 +54,14 @@ pub fn read_all() -> Result<()> {
 
     // /etc/connectrc — skip silently on permission errors.
     if let Err(e) = read_one("/etc/connectrc", &mut table) {
-        eprintln!("DEBUG: could not read /etc/connectrc: {e}");
+        tracing::debug!("/etc/connectrc: {e}");
     }
 
     // ~/.connectrc.
     if let Some(home) = home_dir() {
         let path = format!("{home}/.connectrc");
         if let Err(e) = read_one(&path, &mut table) {
-            eprintln!("DEBUG: could not read {path}: {e}");
+            tracing::debug!("{path}: {e}");
         }
     }
     Ok(())
@@ -117,7 +117,7 @@ fn parse_line(file: &str, lineno: usize, raw: &str, table: &mut HashMap<String, 
         return;
     }
     table.insert(key.to_string(), value.to_string());
-    eprintln!("DEBUG: parameter `{key}' set to `{value}'");
+    tracing::debug!("parameter `{key}' set to `{value}'");
 }
 
 /// Look up a parameter by name. Env var wins; fall back to the file
