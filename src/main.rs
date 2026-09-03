@@ -11,6 +11,10 @@ async fn main() {
     sc::log::init_tracing();
 
     let argv: Vec<String> = std::env::args().collect();
+    // Read parameter files (/etc/connectrc, ~/.connectrc) before CLI
+    // parsing — connect.c applies env-vars on top of the file table.
+    let _ = sc::parameters::read_all();
+
     let cfg = match cli::parse(&argv) {
         Ok(c) => c,
         Err(e) => {
@@ -26,6 +30,14 @@ async fn main() {
 }
 
 async fn run(mut cfg: sc::config::Config) -> Result<()> {
+    // Apply -R resolver override before any DNS lookup.
+    #[cfg(target_os = "linux")]
+    if let Some(ns) = cfg.socks_ns {
+        if let Err(e) = sc::switch_ns::apply(ns) {
+            sc::error!("switch_ns: {e}");
+        }
+    }
+
     // Initialise the direct-table bypass list from env vars and -D.
     init_direct_table(&cfg);
 

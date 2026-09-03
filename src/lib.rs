@@ -16,6 +16,7 @@ pub mod parameters;
 pub mod proxy;
 pub mod relay;
 pub mod resolve;
+pub mod switch_ns;
 pub mod tty;
 
 pub use error::{Error, Result};
