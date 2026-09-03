@@ -1,6 +1,6 @@
 # sc — ssh-connect (Rust)
 
-A drop-in replacement for gotoh's [`connect.c`](../ssh-connect/connect.c) used as
+A drop-in replacement for gotoh's [`connect.c`](https://github.com/gotoh/ssh-connect) used as
 OpenSSH `ProxyCommand`. Forwards stdin/stdout (or a local TCP socket) to a
 TCP destination reached through a SOCKS4/4a/5, HTTP CONNECT, or TELNET proxy.
 
