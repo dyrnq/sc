@@ -1,6 +1,6 @@
 [package]
 name = "sc"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 description = "ssh-connect: SSH ProxyCommand replacement (SOCKS4/4a/5, HTTP CONNECT, TELNET)"
 license = "GPL-2.0-or-later"
