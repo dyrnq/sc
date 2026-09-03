@@ -103,17 +103,17 @@ fn parse_line(file: &str, lineno: usize, raw: &str, table: &mut HashMap<String, 
         return;
     }
     let Some(eq) = trimmed_start.find('=') else {
-        crate::error!("{file}:{lineno}: missing `='");
+        tracing::error!("{file}:{lineno}: missing `='");
         return;
     };
     let key = trimmed_start[..eq].trim();
     let value = trimmed_start[eq + 1..].trim();
     if key.is_empty() {
-        crate::error!("{file}:{lineno}: empty key");
+        tracing::error!("{file}:{lineno}: empty key");
         return;
     }
     if !KNOWN_KEYS.contains(&key) {
-        crate::error!("{file}:{lineno}: unknown parameter `{key}'");
+        tracing::error!("{file}:{lineno}: unknown parameter `{key}'");
         return;
     }
     table.insert(key.to_string(), value.to_string());

@@ -43,6 +43,7 @@ pub fn parse_auth_list(spec: &str) -> Vec<u8> {
 
 /// Run the full SOCKS5 handshake. By the time this returns, the `stream`
 /// is connected to the destination through the proxy.
+#[tracing::instrument(skip(stream), fields(method = ?cfg.socks5_auth))]
 pub async fn begin(stream: &mut TcpStream, cfg: &mut Config) -> Result<()> {
     let mut methods = match cfg.socks5_auth.as_deref() {
         Some(spec) => parse_auth_list(spec),

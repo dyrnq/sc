@@ -29,6 +29,7 @@ pub enum HttpStart {
 /// reconnect, or `Err` on hard failure.
 ///
 /// `cfg.proxy_auth` controls whether `Proxy-Authorization` is sent.
+#[tracing::instrument(skip(stream), fields(?cfg.proxy_auth))]
 pub async fn begin(stream: &mut TcpStream, cfg: &mut Config) -> Result<HttpStart> {
     send_request(stream, cfg).await?;
     let status = read_status_line(stream).await?;

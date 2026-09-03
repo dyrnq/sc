@@ -33,6 +33,7 @@ const SOCKS4A_MARKER: u8 = 0x01;
 
 /// Run the SOCKS4 / 4a handshake. By the time this returns, the `stream`
 /// is connected to the destination through the proxy.
+#[tracing::instrument(skip(stream), fields(version = cfg.socks_version))]
 pub async fn begin(stream: &mut TcpStream, cfg: &mut Config) -> Result<()> {
     let user = cfg
         .relay_user

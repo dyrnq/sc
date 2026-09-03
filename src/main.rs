@@ -8,8 +8,6 @@ use std::time::Duration;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    sc::log::init_tracing();
-
     let argv: Vec<String> = std::env::args().collect();
     // Read parameter files (/etc/connectrc, ~/.connectrc) before CLI
     // parsing — connect.c applies env-vars on top of the file table.
@@ -23,6 +21,12 @@ async fn main() {
         }
     };
 
+    // Init tracing *after* parsing so `cfg.f_debug` can drive the level
+    // (1 → debug, ≥2 → trace). `RUST_LOG` still wins if set, matching
+    // the usual precedence. error-level events from parameter-file parsing
+    // above are visible regardless of level.
+    sc::log::init_tracing(cfg.f_debug);
+
     if let Err(e) = run(cfg).await {
         eprintln!("[fatal] {e}");
         std::process::exit(1);
@@ -34,7 +38,7 @@ async fn run(mut cfg: sc::config::Config) -> Result<()> {
     #[cfg(target_os = "linux")]
     if let Some(ns) = cfg.socks_ns {
         if let Err(e) = sc::switch_ns::apply(ns) {
-            sc::error!("switch_ns: {e}");
+            tracing::error!("switch_ns: {e}");
         }
     }
 
@@ -110,7 +114,7 @@ fn init_direct_table(cfg: &sc::config::Config) {
     match direct_table::initialize(&entries, auto) {
         Ok(n) if n > 0 => eprintln!("DEBUG: direct table loaded {n} entries"),
         Ok(_) => {}
-        Err(e) => sc::error!("direct table: {e}"),
+        Err(e) => tracing::error!("direct table: {e}"),
     }
 }
 

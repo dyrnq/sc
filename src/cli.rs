@@ -400,9 +400,6 @@ impl ArgParser {
             self.cfg.relay_method = ProxyMethod::Direct;
         }
 
-        // Global debug flag for the `debug!` macro.
-        Config::set_global_debug(self.cfg.f_debug > 0);
-
         Ok(())
     }
 }

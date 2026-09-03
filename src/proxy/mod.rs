@@ -27,6 +27,7 @@ pub async fn connect_relay(cfg: &Config) -> Result<TcpStream> {
 ///
 /// HTTP CONNECT has its own retry loop (302 / 401 / 407), so callers should
 /// dispatch Http explicitly via `http::begin` rather than this dispatcher.
+#[tracing::instrument(skip(stream), fields(?cfg.relay_method, socks_version = cfg.socks_version))]
 pub async fn handshake(stream: &mut TcpStream, cfg: &mut Config) -> Result<()> {
     use crate::config::ProxyMethod;
     match cfg.relay_method {

@@ -73,6 +73,7 @@ pub fn expand(fmt: &str, host: &str, port: u16) -> String {
 
 /// Run the TELNET proxy handshake. By the time this returns, the
 /// `stream` is connected to the destination through the proxy.
+#[tracing::instrument(skip(stream), fields(?cfg.telnet_command))]
 pub async fn begin(stream: &mut TcpStream, cfg: &Config) -> Result<()> {
     let template = cfg
         .telnet_command

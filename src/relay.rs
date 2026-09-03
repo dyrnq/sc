@@ -33,6 +33,7 @@ use crate::error::{Error, Result};
 /// `remote` is borrowed mutably so that hold-session can keep the same
 /// `TcpStream` alive across multiple accepts. `idle == None` disables the
 /// idle timeout (every read blocks forever).
+#[tracing::instrument(skip_all, fields(?hold, ?idle))]
 pub async fn relay<R, W>(
     local_r: R,
     mut local_w: W,
@@ -104,14 +105,14 @@ where
     tokio::pin!(r2l);
     tokio::select! {
         l = &mut l2r => {
-            if let Err(e) = &l { crate::error!("relay local→remote: {e}"); }
+            if let Err(e) = &l { tracing::error!("relay local→remote: {e}"); }
             // Drain remote→local before returning.
             if let Err(e) = r2l.await {
-                crate::error!("relay remote→local (drain): {e}");
+                tracing::error!("relay remote→local (drain): {e}");
             }
         }
         r = &mut r2l => {
-            if let Err(e) = &r { crate::error!("relay remote→remote: {e}"); }
+            if let Err(e) = &r { tracing::error!("relay remote→remote: {e}"); }
         }
     }
     Ok(())

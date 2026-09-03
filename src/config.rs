@@ -4,7 +4,6 @@
 //! and then read by the rest of the program.
 
 use std::net::Ipv4Addr;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Address-family selection. `--family v4|v6|any`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -190,21 +189,5 @@ impl Config {
 
     pub fn debug(&self) -> u8 {
         self.f_debug
-    }
-}
-
-// Global debug flag — the `debug!` macro reads this without needing to thread
-// the Config everywhere. Set once during `cli::parse`.
-static GLOBAL_DEBUG: AtomicBool = AtomicBool::new(false);
-
-impl Config {
-    /// Set the global debug flag (called from `cli::parse`).
-    pub fn set_global_debug(on: bool) {
-        GLOBAL_DEBUG.store(on, Ordering::Relaxed);
-    }
-
-    /// Read the global debug flag.
-    pub fn global_debug() -> bool {
-        GLOBAL_DEBUG.load(Ordering::Relaxed)
     }
 }

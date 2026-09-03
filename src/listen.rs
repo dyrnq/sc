@@ -57,7 +57,7 @@ async fn accept_loop_hold(listener: TcpListener, cfg: &Config) -> Result<()> {
         // `hold=true` so local EOF doesn't propagate to the remote.
         let (lr, lw) = local.into_split();
         if let Err(e) = relay::relay(lr, lw, &mut remote, true, idle_timeout(cfg)).await {
-            crate::error!("hold-session relay: {e}");
+            tracing::error!("hold-session relay: {e}");
         }
         // If the remote side died (peek returns Err), give up. peek() waits
         // for data so we use try_peek-style detection: check readiness via
