@@ -59,10 +59,10 @@ async fn send_request(stream: &mut TcpStream, cfg: &Config) -> Result<()> {
         let user = cfg
             .relay_user
             .as_deref()
-            .ok_or(Error::Auth("missing proxy user"))?;
+            .ok_or(Error::Auth("missing proxy user".into()))?;
         let pass = std::env::var("HTTP_PROXY_PASSWORD")
             .or_else(|_| std::env::var("CONNECT_PASSWORD"))
-            .map_err(|_| Error::Auth("no proxy password in env"))?;
+            .map_err(|_| Error::Auth("no proxy password in env".into()))?;
         let creds = format!("{user}:{pass}");
         use base64::Engine;
         let b64 = base64::engine::general_purpose::STANDARD.encode(creds);

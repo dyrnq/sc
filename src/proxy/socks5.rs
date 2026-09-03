@@ -91,12 +91,13 @@ async fn socks5_do_auth_userpass(stream: &mut TcpStream, cfg: &Config) -> Result
         .relay_user
         .clone()
         .or_else(|| crate::auth::determine_relay_user(cfg.relay_method, cfg.socks_version).ok().flatten())
-        .ok_or(Error::Auth("missing SOCKS5 user"))?;
+        .ok_or(Error::Auth("missing SOCKS5 user".into()))?;
     let pass = crate::auth::readpass(
         "SOCKS5 password: ",
         cfg.relay_method,
         cfg.socks_version,
-    )?;
+    )
+    .await?;
 
     let user_bytes = user.as_bytes();
     let pass_bytes = pass.as_bytes();

@@ -49,14 +49,45 @@ pub fn env_password(method: ProxyMethod, _socks_version: u8) -> Option<String> {
 
 /// Read a password: env vars first, then `SSH_ASKPASS` (Phase 6), then
 /// `/dev/tty` (Phase 5).
-pub fn readpass(prompt: &str, method: ProxyMethod, socks_version: u8) -> Result<String> {
+pub async fn readpass(prompt: &str, method: ProxyMethod, socks_version: u8) -> Result<String> {
     if let Some(p) = env_password(method, socks_version) {
         return Ok(p);
     }
-    if std::env::var("SSH_ASKPASS").is_ok() {
-        return Err(Error::Todo("readpass via SSH_ASKPASS (Phase 6)"));
+    if let Ok(program) = std::env::var("SSH_ASKPASS") {
+        #[cfg(unix)]
+        {
+            // On Unix, only use askpass when DISPLAY is set (matches
+            // connect.c line 2058-2060).
+            if std::env::var("DISPLAY").is_ok() {
+                return ssh_askpass(prompt, &program).await;
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = program;
+            return ssh_askpass(prompt, &program).await;
+        }
     }
     crate::tty::tty_readpass(prompt)
+}
+
+/// Spawn `SSH_ASKPASS` with `prompt` as its argv[1], read the first line
+/// of its stdout as the password.
+async fn ssh_askpass(prompt: &str, program: &str) -> Result<String> {
+    let output = tokio::process::Command::new(program)
+        .arg(prompt)
+        .output()
+        .await
+        .map_err(|e| Error::Auth(format!("SSH_ASKPASS spawn: {e}")))?;
+    if !output.status.success() {
+        return Err(Error::Auth(format!(
+            "SSH_ASKPASS exited {:?}",
+            output.status.code()
+        )));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let first = stdout.lines().next().unwrap_or("").to_string();
+    Ok(first.trim_end_matches(['\r', '\n']).to_string())
 }
 
 #[cfg(unix)]
@@ -75,4 +106,38 @@ fn system_username() -> String {
 #[cfg(not(unix))]
 fn system_username() -> String {
     String::from("user")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn ssh_askpass_invokes_program() {
+        // Create a tiny shell script that echoes its argv[1] on stdout.
+        let script = std::env::temp_dir().join("sc-askpass-test.sh");
+        std::fs::write(&script, "#!/bin/sh\necho \"$1\"\n").unwrap();
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+        unsafe {
+            std::env::set_var("SSH_ASKPASS", &script);
+        }
+        let pass = ssh_askpass("prompt-text", script.to_str().unwrap()).await.unwrap();
+        unsafe {
+            std::env::remove_var("SSH_ASKPASS");
+        }
+        assert_eq!(pass, "prompt-text");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn ssh_askpass_strips_trailing_newline() {
+        let script = std::env::temp_dir().join("sc-askpass-crlf-test.sh");
+        std::fs::write(&script, "#!/bin/sh\nprintf '%s\\r\\n' \"$1\"\n").unwrap();
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+        let pass = ssh_askpass("secret-prompt", script.to_str().unwrap()).await.unwrap();
+        assert_eq!(pass, "secret-prompt");
+    }
 }

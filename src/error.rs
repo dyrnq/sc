@@ -18,7 +18,7 @@ pub enum Error {
     Config(String),
 
     #[error("auth: {0}")]
-    Auth(&'static str),
+    Auth(String),
 
     #[error("DNS: {0}")]
     Dns(String),
