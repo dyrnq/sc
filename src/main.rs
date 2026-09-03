@@ -1,6 +1,7 @@
 //! `sc` — ssh-connect: an OpenSSH `ProxyCommand` replacement.
 //!
-//! Phase 3: HTTP CONNECT (with 302 redirect retry). SOCKS5 NOAUTH also live.
+//! Phases 1-9: all proxy methods (direct / SOCKS4 / SOCKS5 / HTTP / TELNET)
+//! + listen mode (-p/-P).
 
 use sc::{cli, config::LocalType, proxy, relay, Error, Result};
 
@@ -17,11 +18,6 @@ async fn main() {
         }
     };
 
-    if matches!(cfg.local_type, LocalType::Socket(_)) {
-        eprintln!("[fatal] listen mode (-p/-P) is not implemented yet");
-        std::process::exit(1);
-    }
-
     if let Err(e) = run(cfg).await {
         eprintln!("[fatal] {e}");
         std::process::exit(1);
@@ -29,23 +25,24 @@ async fn main() {
 }
 
 async fn run(mut cfg: sc::config::Config) -> Result<()> {
+    // Listen mode (-p / -P).
+    if matches!(cfg.local_type, LocalType::Socket(_)) {
+        return sc::listen::accept_loop(&cfg).await;
+    }
+
     use sc::config::ProxyMethod;
 
     let mut stream = match cfg.relay_method {
         ProxyMethod::Direct => proxy::direct::connect(&cfg).await?,
-        ProxyMethod::Socks => {
-            // SOCKS5 only; SOCKS4 in Phase 7.
-            if cfg.socks_version != 5 {
-                return Err(Error::Todo("SOCKS4/4a (Phase 7)"));
-            }
-            proxy::connect_relay(&cfg).await?
-        }
+        ProxyMethod::Socks => proxy::connect_relay(&cfg).await?,
         ProxyMethod::Http => {
             // HTTP CONNECT with 302 / 401 / 407 retry loop.
             return http_with_retry(cfg).await;
         }
         ProxyMethod::Telnet => {
-            return Err(Error::Todo("TELNET proxy (Phase 8)"));
+            let mut s = proxy::connect_relay(&cfg).await?;
+            crate::proxy::telnet::begin(&mut s, &cfg).await?;
+            return relay::relay_stdio(s).await;
         }
         ProxyMethod::Undecided => return Err(Error::Config("no proxy method".into())),
     };
