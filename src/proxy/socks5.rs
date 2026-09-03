@@ -72,13 +72,51 @@ pub async fn begin(stream: &mut TcpStream, cfg: &mut Config) -> Result<()> {
     match chosen {
         method::NOAUTH => {}
         method::USERPASS => {
-            return Err(Error::Todo("SOCKS5 USERPASS (Phase 4)"));
+            socks5_do_auth_userpass(stream, cfg).await?;
         }
         m => return Err(Error::Socks5UnsupportedMethod(m)),
     }
 
     send_connect(stream, cfg).await?;
     recv_connect_reply(stream).await?;
+    Ok(())
+}
+
+/// SOCKS5 USERPASS subnegotiation (RFC 1929).
+///
+/// Wire format (request): `VER=1 | ULEN | UNAME | PLEN | PASSWD`.
+/// Wire format (reply): `VER | STATUS` (STATUS=0 is success).
+async fn socks5_do_auth_userpass(stream: &mut TcpStream, cfg: &Config) -> Result<()> {
+    let user = cfg
+        .relay_user
+        .clone()
+        .or_else(|| crate::auth::determine_relay_user(cfg.relay_method, cfg.socks_version).ok().flatten())
+        .ok_or(Error::Auth("missing SOCKS5 user"))?;
+    let pass = crate::auth::readpass(
+        "SOCKS5 password: ",
+        cfg.relay_method,
+        cfg.socks_version,
+    )?;
+
+    let user_bytes = user.as_bytes();
+    let pass_bytes = pass.as_bytes();
+    if user_bytes.len() > 255 || pass_bytes.len() > 255 {
+        return Err(Error::Config("SOCKS5 username/password too long".into()));
+    }
+
+    let mut req = Vec::with_capacity(3 + user_bytes.len() + pass_bytes.len());
+    req.push(0x01); // subnegotiation VER
+    req.push(user_bytes.len() as u8);
+    req.extend_from_slice(user_bytes);
+    req.push(pass_bytes.len() as u8);
+    req.extend_from_slice(pass_bytes);
+    stream.write_all(&req).await?;
+
+    let mut resp = [0u8; 2];
+    stream.read_exact(&mut resp).await?;
+    if resp[0] != 0x01 || resp[1] != 0x00 {
+        return Err(Error::Socks5AuthFailed);
+    }
     Ok(())
 }
 
@@ -275,5 +313,65 @@ mod tests {
         let mut stream = TcpStream::connect(addr).await.unwrap();
         begin(&mut stream, &mut cfg).await.unwrap();
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn userpass_handshake() {
+        // Pin env vars for this test. Rust 2024 marked these as unsafe.
+        unsafe {
+            std::env::set_var("SOCKS5_PASSWD", "secret");
+        }
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut s, _) = listener.accept().await.unwrap();
+            // Greeting
+            let mut hdr = [0u8; 2];
+            s.read_exact(&mut hdr).await.unwrap();
+            let mut methods = vec![0u8; hdr[1] as usize];
+            s.read_exact(&mut methods).await.unwrap();
+            // Pick USERPASS.
+            s.write_all(&[0x05, method::USERPASS]).await.unwrap();
+            // Read USERPASS subneg
+            let mut ver = [0u8; 1];
+            s.read_exact(&mut ver).await.unwrap();
+            assert_eq!(ver[0], 0x01);
+            let mut ulen = [0u8; 1];
+            s.read_exact(&mut ulen).await.unwrap();
+            let mut uname = vec![0u8; ulen[0] as usize];
+            s.read_exact(&mut uname).await.unwrap();
+            assert_eq!(uname, b"alice");
+            let mut plen = [0u8; 1];
+            s.read_exact(&mut plen).await.unwrap();
+            let mut pwd = vec![0u8; plen[0] as usize];
+            s.read_exact(&mut pwd).await.unwrap();
+            assert_eq!(pwd, b"secret");
+            // Reply success.
+            s.write_all(&[0x01, 0x00]).await.unwrap();
+            // Read CONNECT
+            let mut conn = [0u8; 4];
+            s.read_exact(&mut conn).await.unwrap();
+            assert_eq!(conn, [0x05, 0x01, 0x00, atyp::IPV4]);
+            let mut dst = [0u8; 6];
+            s.read_exact(&mut dst).await.unwrap();
+            s.write_all(&[0x05, 0x00, 0x00, atyp::IPV4, 0, 0, 0, 0, 0, 0])
+                .await
+                .unwrap();
+        });
+
+        let mut cfg = Config::default();
+        cfg.relay_method = crate::config::ProxyMethod::Socks;
+        cfg.relay_user = Some("alice".into());
+        cfg.dest_host = "1.2.3.4".into();
+        cfg.dest_port = 22;
+        cfg.socks_resolve = ResolveMode::Remote;
+
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        begin(&mut stream, &mut cfg).await.unwrap();
+        server.await.unwrap();
+        unsafe {
+            std::env::remove_var("SOCKS5_PASSWD");
+        }
     }
 }
