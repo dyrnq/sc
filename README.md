@@ -39,7 +39,8 @@ to keep the CLI 1:1-compatible with `connect.c`.
   is taken from the binary filename (e.g. `connect-ssh` → 22).
 - **`-P` falls through to `-p`** and sets hold-session.
 - **`-R <dotted-IPv4>`**: replaces the resolver's nameserver list with the
-  given IPv4 (Linux only — uses glibc's `__res_state`).
+  given IPv4 (cross-platform — hickory-resolver uses it as the only
+  upstream).
 - **`-D`**: enumerates local network interfaces and adds their
   `addr/mask` to the direct table, so traffic to those subnets bypasses
   the proxy.
@@ -239,8 +240,12 @@ cargo build --release
 
 Dependencies (declared in `Cargo.toml`): `tokio`, `thiserror`, `base64`,
 `tracing`, `tracing-subscriber`, `libc`. Unix-only: `nix`, `signal-hook`.
-Windows-only: `windows-sys`. The `switch_ns` resolver override uses a
-18-line C shim (`csrc/switch_ns_shim.c`) compiled via the `cc` crate.
+Windows-only: `windows-sys`. DNS resolution uses
+[`hickory-resolver`](https://crates.io/crates/hickory-resolver) (pure
+Rust DNS protocol stack — libc `getaddrinfo` is not involved). `-R <IPv4>`
+plugs that IP into hickory's nameserver list; without `-R` hickory reads
+`/etc/resolv.conf` (Unix) or the registry (Windows). `/etc/hosts` is
+auto-loaded.
 
 ## CI & releases
 
@@ -283,12 +288,8 @@ src/
 │   ├── socks5.rs   SOCKS5 (NOAUTH + USERPASS, IPv4/IPv6/DOMAINNAME)
 │   └── telnet.rs    TELNET (-c template expansion)
 ├── relay.rs         EOF-asymmetric bidirectional relay
-├── resolve.rs       DNS lookup_host with --family filter
-├── switch_ns.rs     glibc -R <IPv4> override (Linux only)
+├── resolve.rs       DNS via hickory-resolver (with optional -R override)
 └── tty.rs           no-echo terminal read (Unix termios / Windows Console)
-
-csrc/
-└── switch_ns_shim.c  C wrapper for the versioned _res@GLIBC_2.2.5 symbol
 ```
 
 ## Status
@@ -307,7 +308,7 @@ All 12 phases from `melodic-sparking-wombat.md` are complete:
 | 8 | TELNET proxy | ✅ |
 | 9 | `-p` listen + `-P` hold-session | ✅ |
 | 10 | `-w` timeout + `-D` direct table | ✅ |
-| 11 | `-R` switch_ns (Linux) + parameter files | ✅ |
+| 11 | `-R` resolver override + parameter files | ✅ |
 | 12 | Polish + README + tests | ✅ |
 
 53 unit tests (and 4 end-to-end SOCKS5 integration tests) cover the
@@ -325,7 +326,7 @@ End-to-end smoke verified:
 - `sc -w 1 -S unreachable example.com 22` aborts with
   "connect timeout after 1s".
 - `sc -R 8.8.8.8 -S unreachable example.com 22` prints
-  "switch_ns using nameserver 8.8.8.8".
+  "resolver using nameserver 8.8.8.8".
 - `connect-22 127.0.0.1` (no port arg) correctly uses port 22.
 
 ## Out of scope (for now)
@@ -335,7 +336,7 @@ End-to-end smoke verified:
 - Per-token parsing for the direct table `Domain` entries: `check_direct`
   currently matches CIDR against numeric IPs; hostname matching is wired
   but only exercised by tests.
-- IPv6 for `-R switch_ns` (only IPv4 in connect.c too).
+- IPv6 for `-R` override (only IPv4 in connect.c too).
 
 ## License
 

@@ -34,12 +34,10 @@ async fn main() {
 }
 
 async fn run(mut cfg: sc::config::Config) -> Result<()> {
-    // Apply -R resolver override before any DNS lookup.
-    #[cfg(target_os = "linux")]
-    if let Some(ns) = cfg.socks_ns
-        && let Err(e) = sc::switch_ns::apply(ns)
-    {
-        tracing::error!("switch_ns: {e}");
+    // Initialise the hickory DNS resolver (with -R override if set)
+    // before any DNS lookup.
+    if let Err(e) = sc::resolve::init(cfg.socks_ns) {
+        tracing::error!("resolve::init: {e}");
     }
 
     // Initialise the direct-table bypass list from env vars and -D.
