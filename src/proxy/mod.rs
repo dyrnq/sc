@@ -24,10 +24,13 @@ pub async fn connect_relay(cfg: &Config) -> Result<TcpStream> {
 }
 
 /// Run the proxy handshake on an already-connected TCP stream.
+///
+/// HTTP CONNECT has its own retry loop (302 / 401 / 407), so callers should
+/// dispatch Http explicitly via `http::begin` rather than this dispatcher.
 pub async fn handshake(stream: &mut TcpStream, cfg: &mut Config) -> Result<()> {
     use crate::config::ProxyMethod;
     match cfg.relay_method {
-        ProxyMethod::Direct | ProxyMethod::Undecided => Ok(()),
+        ProxyMethod::Direct | ProxyMethod::Undecided | ProxyMethod::Http => Ok(()),
         ProxyMethod::Socks => {
             if cfg.socks_version == 5 {
                 socks5::begin(stream, cfg).await
@@ -35,7 +38,6 @@ pub async fn handshake(stream: &mut TcpStream, cfg: &mut Config) -> Result<()> {
                 socks4::begin(stream, cfg).await
             }
         }
-        ProxyMethod::Http => http::begin(stream, cfg).await,
         ProxyMethod::Telnet => telnet::begin(stream, cfg).await,
     }
 }

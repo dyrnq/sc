@@ -1,6 +1,6 @@
 //! `sc` — ssh-connect: an OpenSSH `ProxyCommand` replacement.
 //!
-//! Phase 2: SOCKS5 (NOAUTH) added. Other proxy methods parse but error out.
+//! Phase 3: HTTP CONNECT (with 302 redirect retry). SOCKS5 NOAUTH also live.
 
 use sc::{cli, config::LocalType, proxy, relay, Error, Result};
 
@@ -33,20 +33,44 @@ async fn run(mut cfg: sc::config::Config) -> Result<()> {
 
     let mut stream = match cfg.relay_method {
         ProxyMethod::Direct => proxy::direct::connect(&cfg).await?,
-        ProxyMethod::Socks | ProxyMethod::Http | ProxyMethod::Telnet => {
-            // Phase 2: only Socks(NOAUTH) works.
-            if !matches!(cfg.relay_method, ProxyMethod::Socks) {
-                return Err(Error::Todo(
-                    "HTTP/TELNET proxy methods are implemented in Phases 3/8",
-                ));
+        ProxyMethod::Socks => {
+            // SOCKS5 only; SOCKS4 in Phase 7.
+            if cfg.socks_version != 5 {
+                return Err(Error::Todo("SOCKS4/4a (Phase 7)"));
             }
             proxy::connect_relay(&cfg).await?
+        }
+        ProxyMethod::Http => {
+            // HTTP CONNECT with 302 / 401 / 407 retry loop.
+            return http_with_retry(cfg).await;
+        }
+        ProxyMethod::Telnet => {
+            return Err(Error::Todo("TELNET proxy (Phase 8)"));
         }
         ProxyMethod::Undecided => return Err(Error::Config("no proxy method".into())),
     };
     debug_message(&cfg);
 
     proxy::handshake(&mut stream, &mut cfg).await?;
+    relay::relay_stdio(stream).await
+}
+
+/// HTTP CONNECT with redirect / auth-challenge retry. Mirrors the
+/// `goto retry` pattern in `connect.c` (lines 3033-3037).
+async fn http_with_retry(mut cfg: sc::config::Config) -> Result<()> {
+    let mut stream = proxy::connect_relay(&cfg).await?;
+    debug_message(&cfg);
+    loop {
+        match proxy::http::begin(&mut stream, &mut cfg).await? {
+            proxy::http::HttpStart::Ok => break,
+            proxy::http::HttpStart::Retry => {
+                // Drop the old connection, reconnect to the (possibly updated)
+                // relay_host:relay_port.
+                drop(stream);
+                stream = proxy::connect_relay(&cfg).await?;
+            }
+        }
+    }
     relay::relay_stdio(stream).await
 }
 
