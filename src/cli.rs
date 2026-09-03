@@ -12,10 +12,10 @@ use crate::config::{Config, Family, LocalType, ProxyAuthType, ProxyMethod, Resol
 use crate::error::{Error, Result};
 
 const USAGE: &str = "\
-usage: sc [-dDnhst45V] [-p local-port] [-R resolve] [-w timeout]
+usage: sc [-dDnhst45V] [-p local-port] [-R resolve] [-w timeout] [-W timeout]
               [-H proxy-server[:port]] [-S [user@]socks-server[:port]]
               [-T proxy-server[:port]] [-c telnet-proxy-command]
-              [--family v4|v6|any] host port
+              [--family v4|v6|any] [--idle-timeout ms] host port
 ";
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -118,6 +118,25 @@ impl ArgParser {
                 self.cfg.family = Family::from_str(&v)
                     .ok_or_else(|| Error::Config(format!("invalid --family: {v}")))?;
             }
+            "idle-timeout" => {
+                let v = match val {
+                    Some(v) => v.to_string(),
+                    None => {
+                        let p = self.pos + 1;
+                        if p >= self.argv.len() {
+                            return Err(Error::Config(
+                                "--idle-timeout requires an argument".into(),
+                            ));
+                        }
+                        let s = self.argv[p].clone();
+                        self.pos += 1;
+                        s
+                    }
+                };
+                self.cfg.read_timeout_ms = v
+                    .parse()
+                    .map_err(|_| Error::Config(format!("invalid --idle-timeout: {v}")))?;
+            }
             other => {
                 return Err(Error::Config(format!("unknown long option: --{other}")));
             }
@@ -159,6 +178,13 @@ impl ArgParser {
                     self.cfg.connect_timeout = v
                         .parse()
                         .map_err(|_| Error::Config(format!("invalid timeout: {v}")))?;
+                    return Ok(());
+                }
+                'W' => {
+                    let v = self.take_arg()?;
+                    self.cfg.read_timeout_ms = v
+                        .parse()
+                        .map_err(|_| Error::Config(format!("invalid idle timeout: {v}")))?;
                     return Ok(());
                 }
                 'S' => {
@@ -471,5 +497,19 @@ mod tests {
         assert_eq!(cfg.local_type, LocalType::Socket(5550));
         assert_eq!(cfg.dest_host, "host");
         assert_eq!(cfg.dest_port, 22);
+    }
+
+    #[test]
+    fn parse_capital_w_sets_idle_timeout() {
+        let argv = make_argv(&["sc", "-W", "30000", "host", "22"]);
+        let cfg = parse(&argv).unwrap();
+        assert_eq!(cfg.read_timeout_ms, 30_000);
+    }
+
+    #[test]
+    fn parse_idle_timeout_long_flag() {
+        let argv = make_argv(&["sc", "--idle-timeout=45000", "host", "22"]);
+        let cfg = parse(&argv).unwrap();
+        assert_eq!(cfg.read_timeout_ms, 45_000);
     }
 }

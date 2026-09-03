@@ -68,14 +68,23 @@ async fn run(mut cfg: sc::config::Config) -> Result<()> {
         ProxyMethod::Telnet => {
             let mut s = open_with_timeout(&cfg, open_relay_only(&cfg)).await?;
             crate::proxy::telnet::begin(&mut s, &cfg).await?;
-            return relay::relay_stdio(s).await;
+            return relay::relay_stdio(s, idle_timeout(&cfg)).await;
         }
         ProxyMethod::Undecided => return Err(Error::Config("no proxy method".into())),
     };
     debug_message(&cfg);
 
     proxy::handshake(&mut stream, &mut cfg).await?;
-    relay::relay_stdio(stream).await
+    relay::relay_stdio(stream, idle_timeout(&cfg)).await
+}
+
+/// Map `cfg.read_timeout_ms` to an `Option<Duration>` for the relay layer.
+/// `0` → disabled, otherwise the configured window.
+fn idle_timeout(cfg: &sc::config::Config) -> Option<Duration> {
+    match cfg.read_timeout_ms {
+        0 => None,
+        ms => Some(Duration::from_millis(ms)),
+    }
 }
 
 /// Initialise the direct-table bypass list from `*_DIRECT` env vars
@@ -144,7 +153,7 @@ async fn http_with_retry(mut cfg: sc::config::Config) -> Result<()> {
             }
         }
     }
-    relay::relay_stdio(stream).await
+    relay::relay_stdio(stream, idle_timeout(&cfg)).await
 }
 
 fn debug_message(cfg: &sc::config::Config) {

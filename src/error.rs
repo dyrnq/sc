@@ -61,4 +61,7 @@ pub enum Error {
 
     #[error("not yet implemented: {0}")]
     Todo(&'static str),
+
+    #[error("relay idle timeout: no traffic for {0:?}")]
+    IdleTimeout(std::time::Duration),
 }

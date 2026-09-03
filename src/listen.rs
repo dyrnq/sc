@@ -18,6 +18,7 @@ use crate::config::{Config, LocalType, ProxyMethod};
 use crate::error::{Error, Result};
 use crate::proxy;
 use crate::relay;
+use std::time::Duration;
 
 /// Accept a single local TCP connection and run the relay loop.
 ///
@@ -44,7 +45,7 @@ async fn accept_loop_once(listener: TcpListener, cfg: &Config) -> Result<()> {
     let (local, _) = listener.accept().await?;
     let mut remote = open_remote(cfg).await?;
     let (lr, lw) = local.into_split();
-    relay::relay(lr, lw, &mut remote, false).await
+    relay::relay(lr, lw, &mut remote, false, idle_timeout(cfg)).await
 }
 
 /// Hold session: bind, accept repeatedly. The remote socket is established
@@ -55,7 +56,7 @@ async fn accept_loop_hold(listener: TcpListener, cfg: &Config) -> Result<()> {
         let (local, _) = listener.accept().await?;
         // `hold=true` so local EOF doesn't propagate to the remote.
         let (lr, lw) = local.into_split();
-        if let Err(e) = relay::relay(lr, lw, &mut remote, true).await {
+        if let Err(e) = relay::relay(lr, lw, &mut remote, true, idle_timeout(cfg)).await {
             crate::error!("hold-session relay: {e}");
         }
         // If the remote side died (peek returns Err), give up. peek() waits
@@ -107,6 +108,14 @@ async fn open_remote(cfg: &Config) -> Result<TcpStream> {
         proxy::handshake(&mut stream, &mut cfg_mut).await?;
     }
     Ok(stream)
+}
+
+/// Map `cfg.read_timeout_ms` to an `Option<Duration>` for the relay layer.
+fn idle_timeout(cfg: &Config) -> Option<Duration> {
+    match cfg.read_timeout_ms {
+        0 => None,
+        ms => Some(Duration::from_millis(ms)),
+    }
 }
 
 // `AsyncRead`/`AsyncWrite` are imported for the `into_split` return type's

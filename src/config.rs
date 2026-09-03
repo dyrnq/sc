@@ -126,6 +126,7 @@ pub struct Config {
 
     pub f_auto_direct: bool,
     pub connect_timeout: u32,
+    pub read_timeout_ms: u64,
     pub f_debug: u8,
 
     pub family: Family,
@@ -150,6 +151,7 @@ impl Default for Config {
             f_hold_session: false,
             f_auto_direct: false,
             connect_timeout: 0,
+            read_timeout_ms: 0,
             f_debug: 0,
             family: Family::Any,
             telnet_command: None,
