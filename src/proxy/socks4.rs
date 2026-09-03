@@ -38,7 +38,11 @@ pub async fn begin(stream: &mut TcpStream, cfg: &mut Config) -> Result<()> {
     let user = cfg
         .relay_user
         .clone()
-        .or_else(|| crate::auth::determine_relay_user(cfg.relay_method, cfg.socks_version).ok().flatten())
+        .or_else(|| {
+            crate::auth::determine_relay_user(cfg.relay_method, cfg.socks_version)
+                .ok()
+                .flatten()
+        })
         .ok_or_else(|| Error::Auth("missing SOCKS4 user".into()))?;
 
     // Resolve dest_host if needed (socks_resolve == Local).
@@ -139,13 +143,15 @@ mod tests {
                 .unwrap();
         });
 
-        let mut cfg = Config::default();
-        cfg.relay_method = crate::config::ProxyMethod::Socks;
-        cfg.socks_version = 4;
-        cfg.relay_user = Some("a".into());
-        cfg.dest_host = "1.2.3.4".into();
-        cfg.dest_port = 22;
-        cfg.socks_resolve = ResolveMode::Local;
+        let mut cfg = Config {
+            relay_method: crate::config::ProxyMethod::Socks,
+            socks_version: 4,
+            relay_user: Some("a".into()),
+            dest_host: "1.2.3.4".into(),
+            dest_port: 22,
+            socks_resolve: ResolveMode::Local,
+            ..Config::default()
+        };
 
         let mut stream = TcpStream::connect(addr).await.unwrap();
         begin(&mut stream, &mut cfg).await.unwrap();
@@ -180,13 +186,15 @@ mod tests {
                 .unwrap();
         });
 
-        let mut cfg = Config::default();
-        cfg.relay_method = crate::config::ProxyMethod::Socks;
-        cfg.socks_version = 4;
-        cfg.relay_user = Some("alice".into());
-        cfg.dest_host = "example.com".into();
-        cfg.dest_port = 443;
-        cfg.socks_resolve = ResolveMode::Remote;
+        let mut cfg = Config {
+            relay_method: crate::config::ProxyMethod::Socks,
+            socks_version: 4,
+            relay_user: Some("alice".into()),
+            dest_host: "example.com".into(),
+            dest_port: 443,
+            socks_resolve: ResolveMode::Remote,
+            ..Config::default()
+        };
 
         let mut stream = TcpStream::connect(addr).await.unwrap();
         begin(&mut stream, &mut cfg).await.unwrap();
@@ -206,13 +214,15 @@ mod tests {
                 .unwrap();
         });
 
-        let mut cfg = Config::default();
-        cfg.relay_method = crate::config::ProxyMethod::Socks;
-        cfg.socks_version = 4;
-        cfg.relay_user = Some("u".into());
-        cfg.dest_host = "1.2.3.4".into();
-        cfg.dest_port = 22;
-        cfg.socks_resolve = ResolveMode::Local;
+        let mut cfg = Config {
+            relay_method: crate::config::ProxyMethod::Socks,
+            socks_version: 4,
+            relay_user: Some("u".into()),
+            dest_host: "1.2.3.4".into(),
+            dest_port: 22,
+            socks_resolve: ResolveMode::Local,
+            ..Config::default()
+        };
 
         let mut stream = TcpStream::connect(addr).await.unwrap();
         let err = begin(&mut stream, &mut cfg).await.unwrap_err();

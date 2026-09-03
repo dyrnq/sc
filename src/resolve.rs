@@ -34,18 +34,18 @@ pub async fn resolve_host(host: &str, port: u16, family: Family) -> Result<Vec<S
             .await
             .map_err(|e| Error::Dns(format!("{host}: {e}")))?;
         for addr in iter {
-            let keep = match (family, addr) {
-                (Family::Any, _) => true,
-                (Family::V4, SocketAddr::V4(_)) => true,
-                (Family::V6, SocketAddr::V6(_)) => true,
-                _ => false,
-            };
+            let keep = matches!(
+                (family, addr),
+                (Family::Any, _)
+                    | (Family::V4, SocketAddr::V4(_))
+                    | (Family::V6, SocketAddr::V6(_))
+            );
             if keep && !out.iter().any(|a| same_addr(*a, addr)) {
                 out.push(addr);
                 // Cap at one of each family — more is wasteful.
                 match family {
                     Family::Any if out.len() >= 2 => break,
-                    Family::V4 | Family::V6 if out.len() >= 1 => break,
+                    Family::V4 | Family::V6 if !out.is_empty() => break,
                     _ => {}
                 }
             }

@@ -55,13 +55,13 @@ where
         let mut buf = vec![0u8; 16 * 1024];
         loop {
             let n = match idle {
-                    Some(d) => match timeout(d, lr.read(&mut buf)).await {
-                        Ok(Ok(n)) => n,
-                        Ok(Err(e)) => return Err(Error::Io(e)),
-                        Err(_) => return Err(Error::IdleTimeout(d)),
-                    },
-                    None => lr.read(&mut buf).await?,
-                };
+                Some(d) => match timeout(d, lr.read(&mut buf)).await {
+                    Ok(Ok(n)) => n,
+                    Ok(Err(e)) => return Err(Error::Io(e)),
+                    Err(_) => return Err(Error::IdleTimeout(d)),
+                },
+                None => lr.read(&mut buf).await?,
+            };
             if n == 0 {
                 if !hold {
                     let _ = rw.shutdown().await;
@@ -85,13 +85,13 @@ where
         let mut buf = vec![0u8; 16 * 1024];
         loop {
             let n = match idle {
-                    Some(d) => match timeout(d, lr.read(&mut buf)).await {
-                        Ok(Ok(n)) => n,
-                        Ok(Err(e)) => return Err(Error::Io(e)),
-                        Err(_) => return Err(Error::IdleTimeout(d)),
-                    },
-                    None => lr.read(&mut buf).await?,
-                };
+                Some(d) => match timeout(d, lr.read(&mut buf)).await {
+                    Ok(Ok(n)) => n,
+                    Ok(Err(e)) => return Err(Error::Io(e)),
+                    Err(_) => return Err(Error::IdleTimeout(d)),
+                },
+                None => lr.read(&mut buf).await?,
+            };
             if n == 0 {
                 let _ = local_w.shutdown().await;
                 return Ok(());
@@ -139,7 +139,7 @@ mod tests {
     /// window, because each chunk resets the clock.
     #[tokio::test]
     async fn idle_timeout_resets_on_activity() {
-        let idle = Some(Duration::from_millis(250));
+        let idle = Duration::from_millis(250);
 
         // Wire: src → local_r; rw → sink. We feed one byte every 50 ms for
         // 500 ms (10 bytes total): each gap is well inside the window, but
@@ -184,11 +184,11 @@ mod tests {
             let mut buf = [0u8; 16];
             let mut total = 0;
             loop {
-                let n = match timeout(idle.unwrap(), from.read(&mut buf)).await {
+                let n = match timeout(idle, from.read(&mut buf)).await {
                     Ok(Ok(0)) => return Ok::<usize, Error>(total),
                     Ok(Ok(n)) => n,
                     Ok(Err(e)) => return Err(Error::Io(e)),
-                    Err(_) => return Err(Error::IdleTimeout(idle.unwrap())),
+                    Err(_) => return Err(Error::IdleTimeout(idle)),
                 };
                 to.write_all(&buf[..n]).await.map_err(Error::Io)?;
                 to.flush().await.map_err(Error::Io)?;
@@ -197,14 +197,18 @@ mod tests {
         };
 
         let (pump_result, _, received) = tokio::join!(pump, writer, reader);
-        assert!(pump_result.is_ok(), "active connection was killed: {:?}", pump_result.err());
+        assert!(
+            pump_result.is_ok(),
+            "active connection was killed: {:?}",
+            pump_result.err()
+        );
         assert_eq!(received, 10, "all 10 bytes should have been pumped through");
     }
 
     /// A silent connection must be reaped once the idle window elapses.
     #[tokio::test]
     async fn idle_timeout_fires_when_silent() {
-        let idle = Some(Duration::from_millis(100));
+        let idle = Duration::from_millis(100);
 
         // Hold `src` open but never write to it.
         let (_src, mut from) = duplex(64);
@@ -214,10 +218,10 @@ mod tests {
         let pump = async {
             let mut buf = [0u8; 16];
             loop {
-                match timeout(idle.unwrap(), from.read(&mut buf)).await {
+                match timeout(idle, from.read(&mut buf)).await {
                     Ok(Ok(_)) => continue,
                     Ok(Err(e)) => return Err::<(), Error>(Error::Io(e)),
-                    Err(_) => return Err::<(), Error>(Error::IdleTimeout(idle.unwrap())),
+                    Err(_) => return Err::<(), Error>(Error::IdleTimeout(idle)),
                 }
             }
         };
@@ -225,7 +229,10 @@ mod tests {
         let result = tokio::time::timeout(Duration::from_secs(2), pump)
             .await
             .expect("pump should give up around the idle window, well before 2s");
-        assert!(result.is_err(), "silent connection should have hit the idle timeout");
+        assert!(
+            result.is_err(),
+            "silent connection should have hit the idle timeout"
+        );
     }
 
     /// `None` disables the idle timeout: a silent connection is NOT reaped.

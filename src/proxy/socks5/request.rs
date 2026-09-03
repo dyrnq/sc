@@ -166,7 +166,7 @@ mod tests {
         let (mut a, mut b) = tokio::io::duplex(64);
         tokio::spawn(async move {
             let mut frame = vec![0x05, 0x00, 0x00, atyp::IPV6];
-            frame.extend(std::iter::repeat(0u8).take(16)); // 16-byte addr
+            frame.extend(std::iter::repeat_n(0u8, 16)); // 16-byte addr
             frame.extend_from_slice(&[0, 0]); // port
             frame.push(0xCC); // sentinel
             b.write_all(&frame).await.unwrap();

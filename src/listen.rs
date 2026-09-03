@@ -45,13 +45,14 @@ pub async fn accept_loop(cfg: &Config) -> Result<()> {
 async fn accept_loop_once(listener: TcpListener, cfg: &Config) -> Result<()> {
     let (local, _) = listener.accept().await?;
     let mut remote = open_remote(cfg).await?;
-    let span = tracing::info_span!("connection", conn_id = crate::conn_id::ConnectionId::next().0);
+    let span = tracing::info_span!(
+        "connection",
+        conn_id = crate::conn_id::ConnectionId::next().0
+    );
     let (lr, lw) = local.into_split();
-    async {
-        relay::relay(lr, lw, &mut remote, false, idle_timeout(cfg)).await
-    }
-    .instrument(span)
-    .await
+    async { relay::relay(lr, lw, &mut remote, false, idle_timeout(cfg)).await }
+        .instrument(span)
+        .await
 }
 
 /// Hold session: bind, accept repeatedly. The remote socket is established
@@ -60,7 +61,10 @@ async fn accept_loop_hold(listener: TcpListener, cfg: &Config) -> Result<()> {
     let mut remote = open_remote(cfg).await?;
     loop {
         let (local, _) = listener.accept().await?;
-        let span = tracing::info_span!("connection", conn_id = crate::conn_id::ConnectionId::next().0);
+        let span = tracing::info_span!(
+            "connection",
+            conn_id = crate::conn_id::ConnectionId::next().0
+        );
         async {
             // `hold=true` so local EOF doesn't propagate to the remote.
             let (lr, lw) = local.into_split();
@@ -84,9 +88,7 @@ async fn accept_loop_hold(listener: TcpListener, cfg: &Config) -> Result<()> {
 async fn remote_alive(remote: &mut TcpStream) -> bool {
     // A 0-byte peek should succeed immediately if the peer is still
     // connected; it returns EOF (Ok(0)) if the peer closed.
-    use tokio::io::AsyncReadExt;
-    matches!(remote.read(&mut []).await, Ok(_)) && remote.peek(&mut [0u8; 1]).await.is_ok()
-        || remote.peek(&mut [0u8; 1]).await.is_ok()
+    remote.peek(&mut [0u8; 1]).await.is_ok()
 }
 
 /// Open a remote socket via the configured proxy method. The returned
@@ -152,11 +154,13 @@ mod tests {
         let listen_port = listener.local_addr().unwrap().port();
         drop(listener);
 
-        let mut cfg = Config::default();
-        cfg.relay_method = ProxyMethod::Direct;
-        cfg.dest_host = "127.0.0.1".into();
-        cfg.dest_port = echo_addr.port();
-        cfg.local_type = LocalType::Socket(listen_port);
+        let cfg = Config {
+            relay_method: ProxyMethod::Direct,
+            dest_host: "127.0.0.1".into(),
+            dest_port: echo_addr.port(),
+            local_type: LocalType::Socket(listen_port),
+            ..Config::default()
+        };
 
         let server = tokio::spawn({
             let cfg = cfg.clone();

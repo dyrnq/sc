@@ -8,7 +8,7 @@
 //! everything in the crate should use `tracing::*!` directly — there are
 //! no wrapper macros on purpose so call sites stay readable.
 
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 /// Initialise the tracing-subscriber. Idempotent in the sense that calling
 /// `try_init` only succeeds the first time, which is what we want: tests

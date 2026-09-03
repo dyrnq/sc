@@ -135,7 +135,10 @@ mod tests {
 
     #[test]
     fn expand_basic() {
-        assert_eq!(expand("telnet %h %p", "example.com", 22), "telnet example.com 22");
+        assert_eq!(
+            expand("telnet %h %p", "example.com", 22),
+            "telnet example.com 22"
+        );
     }
 
     #[test]
@@ -161,17 +164,21 @@ mod tests {
             let mut buf = vec![0u8; 64];
             let _ = s.read(&mut buf).await.unwrap();
             // Send banner lines and a "connected to" line.
-            s.write_all(b"Trying...\r\nConnected to example.com.\r\n").await.unwrap();
+            s.write_all(b"Trying...\r\nConnected to example.com.\r\n")
+                .await
+                .unwrap();
         });
 
-        let mut cfg = Config::default();
-        cfg.relay_method = crate::config::ProxyMethod::Telnet;
-        cfg.telnet_command = Some("telnet %h %p".into());
-        cfg.dest_host = "example.com".into();
-        cfg.dest_port = 22;
+        let cfg = Config {
+            relay_method: crate::config::ProxyMethod::Telnet,
+            telnet_command: Some("telnet %h %p".into()),
+            dest_host: "example.com".into(),
+            dest_port: 22,
+            ..Config::default()
+        };
 
         let mut s = TcpStream::connect(addr).await.unwrap();
-        begin(&mut s, &mut cfg).await.unwrap();
+        begin(&mut s, &cfg).await.unwrap();
         server.await.unwrap();
     }
 
@@ -183,17 +190,21 @@ mod tests {
             let (mut s, _) = listener.accept().await.unwrap();
             let mut buf = vec![0u8; 64];
             let _ = s.read(&mut buf).await.unwrap();
-            s.write_all(b"connect: connection refused\r\n").await.unwrap();
+            s.write_all(b"connect: connection refused\r\n")
+                .await
+                .unwrap();
         });
 
-        let mut cfg = Config::default();
-        cfg.relay_method = crate::config::ProxyMethod::Telnet;
-        cfg.telnet_command = Some("open %h %p".into());
-        cfg.dest_host = "host".into();
-        cfg.dest_port = 22;
+        let cfg = Config {
+            relay_method: crate::config::ProxyMethod::Telnet,
+            telnet_command: Some("open %h %p".into()),
+            dest_host: "host".into(),
+            dest_port: 22,
+            ..Config::default()
+        };
 
         let mut s = TcpStream::connect(addr).await.unwrap();
-        let err = begin(&mut s, &mut cfg).await.unwrap_err();
+        let err = begin(&mut s, &cfg).await.unwrap_err();
         match err {
             Error::Telnet(msg) => assert!(msg.contains("refused")),
             _ => panic!("expected Telnet error"),

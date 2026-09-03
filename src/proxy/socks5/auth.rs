@@ -15,14 +15,14 @@ pub async fn do_userpass(stream: &mut TcpStream, cfg: &Config) -> Result<()> {
     let user = cfg
         .relay_user
         .clone()
-        .or_else(|| crate::auth::determine_relay_user(cfg.relay_method, cfg.socks_version).ok().flatten())
+        .or_else(|| {
+            crate::auth::determine_relay_user(cfg.relay_method, cfg.socks_version)
+                .ok()
+                .flatten()
+        })
         .ok_or(Error::Auth("missing SOCKS5 user".into()))?;
-    let pass = crate::auth::readpass(
-        "SOCKS5 password: ",
-        cfg.relay_method,
-        cfg.socks_version,
-    )
-    .await?;
+    let pass =
+        crate::auth::readpass("SOCKS5 password: ", cfg.relay_method, cfg.socks_version).await?;
 
     let user_bytes = user.as_bytes();
     let pass_bytes = pass.as_bytes();

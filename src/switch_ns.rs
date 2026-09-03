@@ -11,9 +11,9 @@
 //! standard GNU linker path and exposes a Rust-friendly extern "C"
 //! function.
 
-use crate::error::Result;
 #[cfg(target_os = "linux")]
 use crate::error::Error;
+use crate::error::Result;
 
 #[cfg(target_os = "linux")]
 unsafe extern "C" {

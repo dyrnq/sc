@@ -123,11 +123,7 @@ async fn run_fake_proxy_session(
         0x01 => {
             let mut addr = [0u8; 4];
             client.read_exact(&mut addr).await?;
-            format!(
-                "{}.{}.{}.{}",
-                addr[0], addr[1], addr[2], addr[3]
-            )
-            .into_bytes()
+            format!("{}.{}.{}.{}", addr[0], addr[1], addr[2], addr[3]).into_bytes()
         }
         0x03 => {
             let mut len = [0u8; 1];
@@ -170,16 +166,17 @@ async fn run_fake_proxy_session(
 }
 
 fn socks5_config_noauth(proxy: SocketAddr, dest: SocketAddr) -> Config {
-    let mut cfg = Config::default();
-    cfg.relay_method = ProxyMethod::Socks;
-    cfg.relay_host = Some(proxy.ip().to_string());
-    cfg.relay_port = proxy.port();
-    cfg.socks_version = 5;
-    cfg.socks_resolve = ResolveMode::Remote;
-    cfg.dest_host = dest.ip().to_string();
-    cfg.dest_port = dest.port();
-    cfg.family = Family::Any;
-    cfg
+    Config {
+        relay_method: ProxyMethod::Socks,
+        relay_host: Some(proxy.ip().to_string()),
+        relay_port: proxy.port(),
+        socks_version: 5,
+        socks_resolve: ResolveMode::Remote,
+        dest_host: dest.ip().to_string(),
+        dest_port: dest.port(),
+        family: Family::Any,
+        ..Config::default()
+    }
 }
 
 fn socks5_config_userpass(proxy: SocketAddr, dest: SocketAddr) -> Config {
@@ -200,6 +197,13 @@ async fn bind_loopback() -> TcpListener {
 /// makes them non-hermetic. Holding this mutex is enough.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+// The four env-mutating end-to-end tests below hold `ENV_LOCK` across
+// `await` points on purpose: serialise env writes, run the entire scenario,
+// then release. This is the standard tokio pattern for env-based test
+// isolation; clippy's `await_holding_lock` is technically right that a panic
+// between lock and release would poison the mutex, but we recover via
+// `unwrap_or_else(|e| e.into_inner())` and the tests are hermetic anyway.
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn end_to_end_noauth_round_trips_payload() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -220,7 +224,9 @@ async fn end_to_end_noauth_round_trips_payload() {
         let mut client = TcpStream::connect(proxy_addr).await.unwrap();
         let mut cfg = socks5_config_noauth(proxy_addr, echo_addr);
 
-        begin(&mut client, &mut cfg).await.expect("NOAUTH handshake should succeed");
+        begin(&mut client, &mut cfg)
+            .await
+            .expect("NOAUTH handshake should succeed");
 
         let payload = b"hello sc via NOAUTH";
         client.write_all(payload).await.unwrap();
@@ -234,6 +240,7 @@ async fn end_to_end_noauth_round_trips_payload() {
         .expect("NOAUTH end-to-end flow should complete within 5s");
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn end_to_end_userpass_success_round_trips_payload() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -262,7 +269,11 @@ async fn end_to_end_userpass_success_round_trips_payload() {
         client.write_all(payload).await.unwrap();
         let mut echoed = vec![0u8; payload.len()];
         client.read_exact(&mut echoed).await.unwrap();
-        assert_eq!(&echoed[..], &payload[..], "payload must round-trip after auth");
+        assert_eq!(
+            &echoed[..],
+            &payload[..],
+            "payload must round-trip after auth"
+        );
     };
 
     timeout(Duration::from_secs(5), body)
@@ -270,6 +281,7 @@ async fn end_to_end_userpass_success_round_trips_payload() {
         .expect("USERPASS end-to-end flow should complete within 5s");
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn end_to_end_userpass_bad_credentials_are_rejected() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -304,6 +316,7 @@ async fn end_to_end_userpass_bad_credentials_are_rejected() {
         .expect("bad-credentials flow should complete within 5s");
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn end_to_end_no_acceptable_method_is_rejected() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -328,10 +341,7 @@ async fn end_to_end_no_acceptable_method_is_rejected() {
         let err = begin(&mut client, &mut cfg)
             .await
             .expect_err("no acceptable method must be rejected");
-        assert!(
-            matches!(err, sc::error::Error::Socks5NoAuth),
-            "got {err:?}"
-        );
+        assert!(matches!(err, sc::error::Error::Socks5NoAuth), "got {err:?}");
     };
 
     timeout(Duration::from_secs(5), body)

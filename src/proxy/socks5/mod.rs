@@ -97,7 +97,10 @@ mod tests {
             parse_auth_list("none,userpass"),
             vec![handshake::method::NOAUTH, handshake::method::USERPASS]
         );
-        assert_eq!(parse_auth_list("userpass"), vec![handshake::method::USERPASS]);
+        assert_eq!(
+            parse_auth_list("userpass"),
+            vec![handshake::method::USERPASS]
+        );
         assert!(parse_auth_list("gssapi,chap,unknown").is_empty());
     }
 }

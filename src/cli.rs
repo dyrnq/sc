@@ -118,7 +118,7 @@ pub fn parse(argv: &[String]) -> Result<Config> {
             if rest.is_empty() {
                 break;
             }
-            p.parse_short_flags(&rest)?;
+            p.parse_short_flags(rest)?;
             // parse_short_flags is responsible for advancing self.pos.
         } else {
             break;
@@ -182,8 +182,9 @@ impl ArgParser {
                         s
                     }
                 };
-                self.cfg.family = Family::from_str(&v)
-                    .ok_or_else(|| Error::Config(format!("invalid --family: {v}")))?;
+                self.cfg.family = v
+                    .parse::<Family>()
+                    .map_err(|_| Error::Config(format!("invalid --family: {v}")))?;
             }
             "idle-timeout" => {
                 let v = match val {
@@ -281,7 +282,7 @@ impl ArgParser {
                 }
                 'R' => {
                     let arg = self.take_arg()?;
-                    if let Some(mode) = ResolveMode::from_str(&arg) {
+                    if let Ok(mode) = arg.parse::<ResolveMode>() {
                         self.cfg.socks_resolve = mode;
                     } else {
                         use std::net::Ipv4Addr;
@@ -291,9 +292,7 @@ impl ArgParser {
                                 self.cfg.socks_resolve = ResolveMode::Local;
                             }
                             Err(_) => {
-                                return Err(Error::Config(format!(
-                                    "invalid -R argument: {arg}"
-                                )));
+                                return Err(Error::Config(format!("invalid -R argument: {arg}")));
                             }
                         }
                     }
@@ -362,15 +361,17 @@ impl ArgParser {
                 parse_relay_spec(&spec, ProxyMethod::Socks, &mut self.cfg)?;
             }
         }
-        if matches!(self.cfg.relay_method, ProxyMethod::Http) && self.cfg.relay_host.is_none() {
-            if let Ok(spec) = std::env::var("HTTP_PROXY") {
-                parse_relay_spec(&spec, ProxyMethod::Http, &mut self.cfg)?;
-            }
+        if matches!(self.cfg.relay_method, ProxyMethod::Http)
+            && self.cfg.relay_host.is_none()
+            && let Ok(spec) = std::env::var("HTTP_PROXY")
+        {
+            parse_relay_spec(&spec, ProxyMethod::Http, &mut self.cfg)?;
         }
-        if matches!(self.cfg.relay_method, ProxyMethod::Telnet) && self.cfg.relay_host.is_none() {
-            if let Ok(spec) = std::env::var("TELNET_PROXY") {
-                parse_relay_spec(&spec, ProxyMethod::Telnet, &mut self.cfg)?;
-            }
+        if matches!(self.cfg.relay_method, ProxyMethod::Telnet)
+            && self.cfg.relay_host.is_none()
+            && let Ok(spec) = std::env::var("TELNET_PROXY")
+        {
+            parse_relay_spec(&spec, ProxyMethod::Telnet, &mut self.cfg)?;
         }
 
         // Default ports.
@@ -435,11 +436,11 @@ pub fn parse_relay_spec(spec: &str, method: ProxyMethod, cfg: &mut Config) -> Re
 
     let mut host = s.to_string();
     let mut port: u16 = 0;
-    if let Some(colon) = host.rfind(':') {
-        if let Ok(p) = host[colon + 1..].parse::<u16>() {
-            port = p;
-            host.truncate(colon);
-        }
+    if let Some(colon) = host.rfind(':')
+        && let Ok(p) = host[colon + 1..].parse::<u16>()
+    {
+        port = p;
+        host.truncate(colon);
     }
 
     if host.is_empty() {
@@ -500,7 +501,13 @@ mod tests {
 
     #[test]
     fn parse_http_with_prefix_and_path() {
-        let argv = make_argv(&["sc", "-H", "http://proxy.example.com:8080/path", "target", "443"]);
+        let argv = make_argv(&[
+            "sc",
+            "-H",
+            "http://proxy.example.com:8080/path",
+            "target",
+            "443",
+        ]);
         let cfg = parse(&argv).unwrap();
         assert_eq!(cfg.relay_method, ProxyMethod::Http);
         assert_eq!(cfg.relay_host.as_deref(), Some("proxy.example.com"));
@@ -582,7 +589,10 @@ mod tests {
         // Pin the long help text against regressions: every short flag must
         // appear in the help so users can discover it. Catches the case
         // where someone adds a flag but forgets to document it.
-        for flag in ['s', 'n', 'h', 't', 'S', 'H', 'T', 'c', 'P', 'p', 'w', 'W', 'a', 'R', '4', '5', 'V', 'd', 'D'] {
+        for flag in [
+            's', 'n', 'h', 't', 'S', 'H', 'T', 'c', 'P', 'p', 'w', 'W', 'a', 'R', '4', '5', 'V',
+            'd', 'D',
+        ] {
             let needle = format!("-{flag}");
             assert!(
                 LONG_HELP.contains(&needle),

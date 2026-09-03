@@ -71,7 +71,7 @@ pub fn read_all() -> Result<()> {
 fn home_dir() -> Option<String> {
     // SAFETY: getenv is async-signal-safe.
     unsafe {
-        let ptr = libc::getenv(b"HOME\0".as_ptr() as *const libc::c_char);
+        let ptr = libc::getenv(c"HOME".as_ptr());
         if ptr.is_null() {
             None
         } else {
@@ -123,10 +123,10 @@ fn parse_line(file: &str, lineno: usize, raw: &str, table: &mut HashMap<String, 
 /// Look up a parameter by name. Env var wins; fall back to the file
 /// table.
 pub fn getparam(name: &str) -> Option<String> {
-    if let Ok(v) = std::env::var(name) {
-        if !v.is_empty() {
-            return Some(v);
-        }
+    if let Ok(v) = std::env::var(name)
+        && !v.is_empty()
+    {
+        return Some(v);
     }
     TABLE.lock().unwrap().get(name).cloned()
 }

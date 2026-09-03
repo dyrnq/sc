@@ -102,7 +102,7 @@ async fn read_status_line(stream: &mut TcpStream) -> Result<u16> {
         .split_whitespace()
         .nth(1)
         .and_then(|s| s.parse().ok())
-        .ok_or_else(|| Error::Http("bad status line"))?;
+        .ok_or(Error::Http("bad status line"))?;
     Ok(code)
 }
 
@@ -164,12 +164,10 @@ async fn parse_auth_challenge(stream: &mut TcpStream) -> Result<()> {
             break;
         }
         let lower = line.to_ascii_lowercase();
-        if lower.starts_with("www-authenticate:")
-            || lower.starts_with("proxy-authenticate:")
+        if (lower.starts_with("www-authenticate:") || lower.starts_with("proxy-authenticate:"))
+            && lower.contains("basic")
         {
-            if lower.contains("basic") {
-                found = true;
-            }
+            found = true;
         }
     }
     if !found {
@@ -207,10 +205,12 @@ mod tests {
                 .unwrap();
         });
 
-        let mut cfg = Config::default();
-        cfg.relay_method = crate::config::ProxyMethod::Http;
-        cfg.dest_host = "example.com".into();
-        cfg.dest_port = 443;
+        let mut cfg = Config {
+            relay_method: crate::config::ProxyMethod::Http,
+            dest_host: "example.com".into(),
+            dest_port: 443,
+            ..Config::default()
+        };
         let mut s = TcpStream::connect(addr).await.unwrap();
         match begin(&mut s, &mut cfg).await.unwrap() {
             HttpStart::Ok => {}
@@ -237,12 +237,14 @@ mod tests {
             .unwrap();
         });
 
-        let mut cfg = Config::default();
-        cfg.relay_method = crate::config::ProxyMethod::Http;
-        cfg.relay_host = Some("oldproxy.example.com".into());
-        cfg.relay_port = 3128;
-        cfg.dest_host = "example.com".into();
-        cfg.dest_port = 443;
+        let mut cfg = Config {
+            relay_method: crate::config::ProxyMethod::Http,
+            relay_host: Some("oldproxy.example.com".into()),
+            relay_port: 3128,
+            dest_host: "example.com".into(),
+            dest_port: 443,
+            ..Config::default()
+        };
         let mut s = TcpStream::connect(addr).await.unwrap();
         match begin(&mut s, &mut cfg).await.unwrap() {
             HttpStart::Retry => {}

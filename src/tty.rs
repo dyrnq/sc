@@ -112,7 +112,7 @@ mod windows {
     use std::io::{Read, Write};
 
     use windows_sys::Win32::System::Console::{
-        GetConsoleMode, GetStdHandle, SetConsoleMode, ENABLE_ECHO_INPUT, STD_INPUT_HANDLE,
+        ENABLE_ECHO_INPUT, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode,
     };
 
     pub fn read(prompt: &str) -> Result<String> {

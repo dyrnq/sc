@@ -4,6 +4,7 @@
 //! and then read by the rest of the program.
 
 use std::net::Ipv4Addr;
+use std::str::FromStr;
 
 /// Address-family selection. `--family v4|v6|any`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -14,13 +15,14 @@ pub enum Family {
     V6,
 }
 
-impl Family {
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for Family {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_ascii_lowercase().as_str() {
-            "any" => Some(Family::Any),
-            "v4" | "ipv4" | "4" => Some(Family::V4),
-            "v6" | "ipv6" | "6" => Some(Family::V6),
-            _ => None,
+            "any" => Ok(Family::Any),
+            "v4" | "ipv4" | "4" => Ok(Family::V4),
+            "v6" | "ipv6" | "6" => Ok(Family::V6),
+            _ => Err(()),
         }
     }
 }
@@ -58,16 +60,19 @@ pub enum ResolveMode {
     Both,
 }
 
-impl ResolveMode {
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for ResolveMode {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_ascii_lowercase().as_str() {
-            "local" => Some(ResolveMode::Local),
-            "remote" => Some(ResolveMode::Remote),
-            "both" => Some(ResolveMode::Both),
-            _ => None,
+            "local" => Ok(ResolveMode::Local),
+            "remote" => Ok(ResolveMode::Remote),
+            "both" => Ok(ResolveMode::Both),
+            _ => Err(()),
         }
     }
+}
 
+impl ResolveMode {
     pub fn name(self) -> &'static str {
         match self {
             ResolveMode::Unknown => "UNKNOWN",

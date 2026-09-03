@@ -12,18 +12,16 @@ use crate::error::{Error, Result};
 pub fn determine_relay_user(method: ProxyMethod, socks_version: u8) -> Result<Option<String>> {
     const FALLBACK: &[&str] = &["LOGNAME", "USER"];
     let candidates: &[&str] = match method {
-        ProxyMethod::Socks if socks_version == 5 => {
-            &["SOCKS5_USER", "SOCKS_USER", "CONNECT_USER"]
-        }
+        ProxyMethod::Socks if socks_version == 5 => &["SOCKS5_USER", "SOCKS_USER", "CONNECT_USER"],
         ProxyMethod::Socks => &["SOCKS4_USER", "SOCKS_USER", "CONNECT_USER"],
         ProxyMethod::Http => &["HTTP_PROXY_USER", "CONNECT_USER"],
         ProxyMethod::Telnet | ProxyMethod::Direct | ProxyMethod::Undecided => &["CONNECT_USER"],
     };
     for name in candidates.iter().chain(FALLBACK) {
-        if let Ok(v) = std::env::var(name) {
-            if !v.is_empty() {
-                return Ok(Some(v));
-            }
+        if let Ok(v) = std::env::var(name)
+            && !v.is_empty()
+        {
+            return Ok(Some(v));
         }
     }
     // Fallback: system username.
@@ -39,10 +37,10 @@ pub fn env_password(method: ProxyMethod, _socks_version: u8) -> Option<String> {
         _ => &["CONNECT_PASSWORD"],
     };
     for name in candidates {
-        if let Ok(v) = std::env::var(name) {
-            if !v.is_empty() {
-                return Some(v);
-            }
+        if let Ok(v) = std::env::var(name)
+            && !v.is_empty()
+        {
+            return Some(v);
         }
     }
     None
@@ -119,12 +117,15 @@ mod tests {
         // Create a tiny shell script that echoes its argv[1] on stdout.
         let script = std::env::temp_dir().join("sc-askpass-test.sh");
         std::fs::write(&script, "#!/bin/sh\necho \"$1\"\n").unwrap();
-        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
 
         unsafe {
             std::env::set_var("SSH_ASKPASS", &script);
         }
-        let pass = ssh_askpass("prompt-text", script.to_str().unwrap()).await.unwrap();
+        let pass = ssh_askpass("prompt-text", script.to_str().unwrap())
+            .await
+            .unwrap();
         unsafe {
             std::env::remove_var("SSH_ASKPASS");
         }
@@ -136,9 +137,12 @@ mod tests {
     async fn ssh_askpass_strips_trailing_newline() {
         let script = std::env::temp_dir().join("sc-askpass-crlf-test.sh");
         std::fs::write(&script, "#!/bin/sh\nprintf '%s\\r\\n' \"$1\"\n").unwrap();
-        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
 
-        let pass = ssh_askpass("secret-prompt", script.to_str().unwrap()).await.unwrap();
+        let pass = ssh_askpass("secret-prompt", script.to_str().unwrap())
+            .await
+            .unwrap();
         assert_eq!(pass, "secret-prompt");
     }
 

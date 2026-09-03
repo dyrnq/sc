@@ -3,7 +3,7 @@
 //! Phases 1-10: all proxy methods + listen + hold + direct-table bypass
 //! (env entries and `-D` local-interface auto-add) + `-w` connect timeout.
 
-use sc::{cli, config::LocalType, conn_id, direct_table, proxy, relay, Error, Result};
+use sc::{Error, Result, cli, config::LocalType, conn_id, direct_table, proxy, relay};
 use std::time::Duration;
 
 #[tokio::main(flavor = "current_thread")]
@@ -36,10 +36,10 @@ async fn main() {
 async fn run(mut cfg: sc::config::Config) -> Result<()> {
     // Apply -R resolver override before any DNS lookup.
     #[cfg(target_os = "linux")]
-    if let Some(ns) = cfg.socks_ns {
-        if let Err(e) = sc::switch_ns::apply(ns) {
-            tracing::error!("switch_ns: {e}");
-        }
+    if let Some(ns) = cfg.socks_ns
+        && let Err(e) = sc::switch_ns::apply(ns)
+    {
+        tracing::error!("switch_ns: {e}");
     }
 
     // Initialise the direct-table bypass list from env vars and -D.
@@ -106,10 +106,10 @@ fn init_direct_table(cfg: &sc::config::Config) {
         ProxyMethod::Telnet | ProxyMethod::Direct | ProxyMethod::Undecided => "",
     };
     let mut entries: Vec<String> = Vec::new();
-    if !key.is_empty() {
-        if let Ok(s) = std::env::var(key) {
-            entries.extend(s.split(',').map(str::to_string));
-        }
+    if !key.is_empty()
+        && let Ok(s) = std::env::var(key)
+    {
+        entries.extend(s.split(',').map(str::to_string));
     }
     if let Ok(s) = std::env::var("CONNECT_DIRECT") {
         entries.extend(s.split(',').map(str::to_string));

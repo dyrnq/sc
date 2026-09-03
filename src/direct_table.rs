@@ -55,10 +55,7 @@ fn parse_entry(spec: &str) -> Option<Entry> {
     // Otherwise treat as a hostname.
     let suffix_only = body.starts_with('.');
     let name = body.trim_start_matches('.').to_ascii_lowercase();
-    let entry = Entry::Domain {
-        name,
-        suffix_only,
-    };
+    let entry = Entry::Domain { name, suffix_only };
     Some(if negative {
         Entry::Negative(Box::new(entry))
     } else {
@@ -102,11 +99,7 @@ fn parse_cidr(spec: &str) -> Option<Entry> {
             if n > 32 {
                 return None;
             }
-            if n == 0 {
-                0
-            } else {
-                0xFFFFFFFFu32 << (32 - n)
-            }
+            if n == 0 { 0 } else { 0xFFFFFFFFu32 << (32 - n) }
         };
         (ip, m)
     } else {
@@ -184,7 +177,7 @@ fn add_local_interfaces(table: &mut Vec<Entry>) -> usize {
                 added += 1;
             }
         }
-        cur = ifa.ifa_next as *mut libc::ifaddrs;
+        cur = ifa.ifa_next;
     }
     // SAFETY: ifap was returned by getifaddrs.
     unsafe { freeifaddrs(ifap) };
