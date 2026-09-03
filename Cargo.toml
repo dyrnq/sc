@@ -1,0 +1,32 @@
+[package]
+name = "sc"
+version = "0.0.1"
+edition = "2024"
+description = "ssh-connect: SSH ProxyCommand replacement (SOCKS4/4a/5, HTTP CONNECT, TELNET)"
+license = "GPL-2.0-or-later"
+
+[[bin]]
+name = "sc"
+path = "src/main.rs"
+
+[lib]
+name = "sc"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1.40", features = ["net", "io-util", "io-std", "macros", "rt-multi-thread", "signal", "time", "sync", "process"] }
+thiserror = "1"
+base64 = "0.22"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+libc = "0.2"
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["term", "net", "feature", "signal"] }
+signal-hook = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Console", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock"] }
+
+[dev-dependencies]
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "test-util"] }
