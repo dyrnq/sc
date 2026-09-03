@@ -1,7 +1,6 @@
 //! `sc` — ssh-connect: an OpenSSH `ProxyCommand` replacement.
 //!
-//! Phase 1 supports direct TCP connections only. SOCKS / HTTP / TELNET
-//! proxies are wired up but return `Error::Todo` until later phases.
+//! Phase 2: SOCKS5 (NOAUTH) added. Other proxy methods parse but error out.
 
 use sc::{cli, config::LocalType, proxy, relay, Error, Result};
 
@@ -32,26 +31,25 @@ async fn main() {
 async fn run(mut cfg: sc::config::Config) -> Result<()> {
     use sc::config::ProxyMethod;
 
-    // Phase 1: only DIRECT works end-to-end. Other methods parse but error
-    // out of the proxy stub.
-    if !matches!(cfg.relay_method, ProxyMethod::Direct) {
-        return Err(Error::Todo(
-            "non-DIRECT proxy methods are implemented in Phases 2-8",
-        ));
-    }
-
-    // Open the connection.
-    let mut stream = proxy::direct::connect(&cfg).await?;
+    let mut stream = match cfg.relay_method {
+        ProxyMethod::Direct => proxy::direct::connect(&cfg).await?,
+        ProxyMethod::Socks | ProxyMethod::Http | ProxyMethod::Telnet => {
+            // Phase 2: only Socks(NOAUTH) works.
+            if !matches!(cfg.relay_method, ProxyMethod::Socks) {
+                return Err(Error::Todo(
+                    "HTTP/TELNET proxy methods are implemented in Phases 3/8",
+                ));
+            }
+            proxy::connect_relay(&cfg).await?
+        }
+        ProxyMethod::Undecided => return Err(Error::Config("no proxy method".into())),
+    };
     debug_message(&cfg);
 
-    // Run the handshake (no-op for DIRECT).
     proxy::handshake(&mut stream, &mut cfg).await?;
-
-    // Bidirectional relay between stdin/stdout and the remote socket.
     relay::relay_stdio(stream).await
 }
 
-/// Print the parsed configuration (matches `connect.c -d` debug output).
 fn debug_message(cfg: &sc::config::Config) {
     eprintln!(
         "DEBUG: relay_method = {} ({:?}), relay_host={:?}, relay_port={}, \
