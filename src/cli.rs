@@ -18,11 +18,78 @@ usage: sc [-dDnhst45V] [-p local-port] [-R resolve] [-w timeout] [-W timeout]
               [--family v4|v6|any] [--idle-timeout ms] host port
 ";
 
+/// Long-form help: one line per flag. Printed by `--help`. Kept separate
+/// from `USAGE` so the short banner stays scannable.
+pub(crate) const LONG_HELP: &str = "\
+sc — ssh-connect: an OpenSSH ProxyCommand replacement for SOCKS4/4a/5,
+HTTP CONNECT, TELNET and direct connections. Drop-in replacement for
+gotoh's connect.c.
+
+Usage:
+  sc [flags] host port
+
+Method (pick one):
+  -n              Direct TCP, no proxy.
+  -h              HTTP CONNECT proxy from $HTTP_PROXY.
+  -s              SOCKS proxy from $SOCKS_SERVER.
+  -t              TELNET proxy from $TELNET_PROXY.
+  -H host[:port]  HTTP CONNECT proxy (explicit host).
+  -S [user@]host[:port]   SOCKS proxy (explicit host).
+  -T host[:port]  TELNET proxy (explicit host).
+
+SOCKS version (with -s or -S):
+  -4              SOCKS v4 / 4a.
+  -5              SOCKS v5 (default).
+
+Listening & timeouts:
+  -p PORT         Accept one local TCP connection on PORT, relay to
+                  remote, exit.
+  -P PORT         Same as -p but keep the remote session across multiple
+                  accepts (hold-session).
+  -w SECS         Connect-timeout (0 = no timeout).
+  -W MS           Relay idle-timeout per direction; 0 disables.
+
+Tuning:
+  -R MODE|IP      SOCKS resolve mode: local / remote / both, or an IPv4
+                  address to use as a custom resolver.
+  -a LIST         Comma-separated auth methods: none,userpass.
+  -c CMD          Telnet proxy command template (%h host, %p port).
+  -D              Auto-add local interface addresses to the direct
+                  (bypass-proxy) list.
+  -d              Debug (repeat to increase verbosity: -dd, -ddd).
+  --family v4|v6|any     Address-family filter.
+  --idle-timeout MS      Same as -W.
+
+Positional:
+  host port       Destination. Port can be omitted if the binary is
+                  symlinked as `connect-PORT`.
+
+Other:
+  -V, --version     Print version and exit.
+  --help             Print this message and exit.
+
+Environment (per-method fallback chain):
+  SOCKS5_SERVER, SOCKS4_SERVER, SOCKS_SERVER
+  HTTP_PROXY, TELNET_PROXY
+  SOCKS5_USER, SOCKS_USER, SOCKS4_USER, HTTP_PROXY_USER, CONNECT_USER,
+  LOGNAME, USER
+  SOCKS5_PASSWD, SOCKS5_PASSWORD, HTTP_PROXY_PASSWORD, CONNECT_PASSWORD
+  SOCKS5_RESOLVE, SOCKS4_RESOLVE, SOCKS_RESOLVE
+  SOCKS5_DIRECT, SOCKS4_DIRECT, HTTP_DIRECT, CONNECT_DIRECT
+  SSH_ASKPASS, DISPLAY (Unix only)
+  /etc/connectrc and ~/.connectrc are also read.
+";
+
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Print the usage banner to stderr.
+/// Print the short usage banner to stderr.
 pub fn print_usage() {
     eprint!("{USAGE}");
+}
+
+/// Print the long-form help text (used by `--help`).
+pub fn print_long_help() {
+    eprint!("{LONG_HELP}");
 }
 
 /// Entry point: parse `argv` (including argv[0]) and return a Config.
@@ -95,7 +162,7 @@ impl ArgParser {
         };
         match name {
             "help" => {
-                print_usage();
+                print_long_help();
                 std::process::exit(0);
             }
             "version" => {
@@ -511,5 +578,19 @@ mod tests {
         let argv = make_argv(&["sc", "--idle-timeout=45000", "host", "22"]);
         let cfg = parse(&argv).unwrap();
         assert_eq!(cfg.read_timeout_ms, 45_000);
+    }
+
+    #[test]
+    fn long_help_mentions_every_short_flag() {
+        // Pin the long help text against regressions: every short flag must
+        // appear in the help so users can discover it. Catches the case
+        // where someone adds a flag but forgets to document it.
+        for flag in ['s', 'n', 'h', 't', 'S', 'H', 'T', 'c', 'P', 'p', 'w', 'W', 'a', 'R', '4', '5', 'V', 'd', 'D'] {
+            let needle = format!("-{flag}");
+            assert!(
+                LONG_HELP.contains(&needle),
+                "LONG_HELP missing flag {needle}"
+            );
+        }
     }
 }

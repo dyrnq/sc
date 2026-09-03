@@ -7,9 +7,10 @@ use crate::config::ProxyMethod;
 use crate::error::{Error, Result};
 
 /// Look up the proxy username for the given method, considering env vars
-/// (`SOCKS5_USER`/`SOCKS4_USER`/`SOCKS_USER`/`HTTP_PROXY_USER`/`CONNECT_USER`)
-/// and finally the system account via `getlogin` (Unix only).
+/// (per-method → `CONNECT_USER` → `LOGNAME` → `USER`) and finally the system
+/// account via `getlogin` (Unix only). Matches `connect.c` line 173-175.
 pub fn determine_relay_user(method: ProxyMethod, socks_version: u8) -> Result<Option<String>> {
+    const FALLBACK: &[&str] = &["LOGNAME", "USER"];
     let candidates: &[&str] = match method {
         ProxyMethod::Socks if socks_version == 5 => {
             &["SOCKS5_USER", "SOCKS_USER", "CONNECT_USER"]
@@ -18,7 +19,7 @@ pub fn determine_relay_user(method: ProxyMethod, socks_version: u8) -> Result<Op
         ProxyMethod::Http => &["HTTP_PROXY_USER", "CONNECT_USER"],
         ProxyMethod::Telnet | ProxyMethod::Direct | ProxyMethod::Undecided => &["CONNECT_USER"],
     };
-    for name in candidates {
+    for name in candidates.iter().chain(FALLBACK) {
         if let Ok(v) = std::env::var(name) {
             if !v.is_empty() {
                 return Ok(Some(v));
@@ -139,5 +140,41 @@ mod tests {
 
         let pass = ssh_askpass("secret-prompt", script.to_str().unwrap()).await.unwrap();
         assert_eq!(pass, "secret-prompt");
+    }
+
+    /// `LOGNAME` / `USER` are part of the fallback chain after the
+    /// per-method env vars but before `getlogin()`. Mirror connect.c.
+    /// Use a mutex so we don't race the parallel integration tests in
+    /// `tests/socks5.rs` over `SOCKS5_PASSWD`.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn determine_relay_user_falls_back_to_logname_user() {
+        use std::sync::Mutex;
+        static LOCK: Mutex<()> = Mutex::new(());
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        // SAFETY: this test owns these env vars during its run.
+        unsafe {
+            std::env::remove_var("SOCKS5_USER");
+            std::env::remove_var("SOCKS_USER");
+            std::env::remove_var("SOCKS4_USER");
+            std::env::remove_var("HTTP_PROXY_USER");
+            std::env::remove_var("CONNECT_USER");
+            std::env::set_var("LOGNAME", "from-logname");
+            std::env::remove_var("USER");
+        }
+        let user = determine_relay_user(ProxyMethod::Socks, 5).unwrap();
+        assert_eq!(user.as_deref(), Some("from-logname"));
+
+        unsafe {
+            std::env::remove_var("LOGNAME");
+            std::env::set_var("USER", "from-user");
+        }
+        let user = determine_relay_user(ProxyMethod::Socks, 5).unwrap();
+        assert_eq!(user.as_deref(), Some("from-user"));
+
+        unsafe {
+            std::env::remove_var("USER");
+        }
     }
 }
