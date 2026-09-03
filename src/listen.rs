@@ -19,6 +19,7 @@ use crate::error::{Error, Result};
 use crate::proxy;
 use crate::relay;
 use std::time::Duration;
+use tracing::Instrument;
 
 /// Accept a single local TCP connection and run the relay loop.
 ///
@@ -44,8 +45,13 @@ pub async fn accept_loop(cfg: &Config) -> Result<()> {
 async fn accept_loop_once(listener: TcpListener, cfg: &Config) -> Result<()> {
     let (local, _) = listener.accept().await?;
     let mut remote = open_remote(cfg).await?;
+    let span = tracing::info_span!("connection", conn_id = crate::conn_id::ConnectionId::next().0);
     let (lr, lw) = local.into_split();
-    relay::relay(lr, lw, &mut remote, false, idle_timeout(cfg)).await
+    async {
+        relay::relay(lr, lw, &mut remote, false, idle_timeout(cfg)).await
+    }
+    .instrument(span)
+    .await
 }
 
 /// Hold session: bind, accept repeatedly. The remote socket is established
@@ -54,11 +60,16 @@ async fn accept_loop_hold(listener: TcpListener, cfg: &Config) -> Result<()> {
     let mut remote = open_remote(cfg).await?;
     loop {
         let (local, _) = listener.accept().await?;
-        // `hold=true` so local EOF doesn't propagate to the remote.
-        let (lr, lw) = local.into_split();
-        if let Err(e) = relay::relay(lr, lw, &mut remote, true, idle_timeout(cfg)).await {
-            tracing::error!("hold-session relay: {e}");
+        let span = tracing::info_span!("connection", conn_id = crate::conn_id::ConnectionId::next().0);
+        async {
+            // `hold=true` so local EOF doesn't propagate to the remote.
+            let (lr, lw) = local.into_split();
+            if let Err(e) = relay::relay(lr, lw, &mut remote, true, idle_timeout(cfg)).await {
+                tracing::error!("hold-session relay: {e}");
+            }
         }
+        .instrument(span)
+        .await;
         // If the remote side died (peek returns Err), give up. peek() waits
         // for data so we use try_peek-style detection: check readiness via
         // a non-blocking read with a 0-length buffer.

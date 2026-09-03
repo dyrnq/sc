@@ -8,6 +8,7 @@
 pub mod auth;
 pub mod cli;
 pub mod config;
+pub mod conn_id;
 pub mod direct_table;
 pub mod error;
 pub mod listen;

@@ -3,7 +3,7 @@
 //! Phases 1-10: all proxy methods + listen + hold + direct-table bypass
 //! (env entries and `-D` local-interface auto-add) + `-w` connect timeout.
 
-use sc::{cli, config::LocalType, direct_table, proxy, relay, Error, Result};
+use sc::{cli, config::LocalType, conn_id, direct_table, proxy, relay, Error, Result};
 use std::time::Duration;
 
 #[tokio::main(flavor = "current_thread")]
@@ -62,6 +62,10 @@ async fn run(mut cfg: sc::config::Config) -> Result<()> {
     if matches!(cfg.local_type, LocalType::Socket(_)) {
         return sc::listen::accept_loop(&cfg).await;
     }
+
+    // Tag the one-shot stdio relay with a connection ID too, so its
+    // log lines show up tagged identically to the listen path.
+    let _conn = conn_id::span(conn_id::ConnectionId::next());
 
     use sc::config::ProxyMethod;
 
