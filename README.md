@@ -102,6 +102,26 @@ Dependencies (declared in `Cargo.toml`): `tokio`, `thiserror`, `base64`,
 Windows-only: `windows-sys`. The `switch_ns` resolver override uses a
 18-line C shim (`csrc/switch_ns_shim.c`) compiled via the `cc` crate.
 
+## CI & releases
+
+`.github/workflows/ci.yml` runs on every push to `main` and on every
+pull request: `cargo fmt --check`, `cargo clippy -D warnings`, and a
+release build + unit-test run on each of `ubuntu-24.04`,
+`macos-14`, `windows-2022` (MSVC and GNU).
+
+`.github/workflows/release.yml` runs on every `v*` tag push (and is
+also dispatchable from the Actions UI). It builds the same matrix as
+`pss` (Linux gnu/musl + aarch64 + armv7, macOS x86_64 + aarch64,
+Windows MSVC + GNU), uploads each binary named
+`sc-<TAG>-<TARGET>{.exe}`, attaches them to a GitHub Release along
+with a `sha256sums.txt`, and copies the inter-tag git log into the
+release body.
+
+The project intentionally does **not** publish to
+[crates.io](https://crates.io/) — install it via `cargo install sc`
+once a release is cut, or download a prebuilt binary from the
+releases page.
+
 ## Module layout
 
 ```
