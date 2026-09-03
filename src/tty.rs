@@ -8,7 +8,7 @@
 //!
 //! Mirrors `connect.c::tty_readpass` (lines 1253-1290 / 1294-1320).
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 
 /// Read a password from the controlling terminal. Echo is disabled during
 /// input and restored on exit.
@@ -28,7 +28,8 @@ pub fn tty_readpass(prompt: &str) -> Result<String> {
 
 #[cfg(unix)]
 mod unix {
-    use super::{Error, Result};
+    use super::Result;
+    use crate::error::Error;
     use std::io::{Read, Write};
     use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd};
 
