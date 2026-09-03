@@ -90,6 +90,146 @@ EOF
 sc internal.example.com 22
 ```
 
+## Use as OpenSSH `ProxyCommand`
+
+OpenSSH's `ProxyCommand` directive runs a program whose stdin/stdout stand
+in for the network socket to the target host. `sc host port` does exactly
+that: it reads bytes on stdin, writes them to `host:port` (via the
+configured proxy), and pumps the reply back to stdout — so it is a
+drop-in for `connect.c` in `~/.ssh/config`.
+
+### `~/.ssh/config` template
+
+The `%h` and `%p` tokens are substituted by `ssh` with the resolved
+destination host and port:
+
+```
+Host internal.internal.example.com
+    ProxyCommand sc -S proxy.corp.example.com:1080 %h %p
+```
+
+Now `ssh user@internal.internal.example.com` connects through the SOCKS5
+proxy at `proxy.corp.example.com:1080`, and `sc` handles the proxy
+handshake transparently.
+
+### Wildcard / per-network match
+
+```
+# Anything that resolves to .internal.example.com goes through SOCKS5.
+Host *.internal.example.com
+    ProxyCommand sc -S proxy.corp.example.com:1080 %h %p
+
+# Anything else (the public internet) goes direct.
+Host *
+    ProxyCommand sc %h %p
+```
+
+The first matching `Host` block wins, so put the most specific patterns
+first. For multi-proxy setups (different proxies per network), list them
+in order of specificity.
+
+### Proxy types
+
+`sc` supports every proxy method `connect.c` does. Pick one per host:
+
+```
+# SOCKS5 (default) with userpass from the environment
+Host s5.internal.example.com
+    ProxyCommand sc -S user@proxy.corp.example.com:1080 %h %p
+
+# SOCKS4 / 4a
+Host s4.internal.example.com
+    ProxyCommand sc -S 4 -S proxy.corp.example.com:1080 %h %p
+
+# HTTP CONNECT proxy
+Host http.internal.example.com
+    ProxyCommand sc -H proxy.corp.example.com:3128 %h %p
+
+# TELNET proxy
+Host telnet.internal.example.com
+    ProxyCommand sc -T telnet-gw.corp.example.com:23 -c 'open %h %p' %h %p
+```
+
+### Credentials
+
+Avoid putting passwords in `~/.ssh/config` — they world-readable by
+default (`chmod 600` is required and easy to forget). Let `sc` read
+them from the environment instead:
+
+```sh
+export SOCKS5_USER=alice
+export SOCKS5_PASSWD=$(pass show proxy/socks5)   # or however you store it
+ssh internal.internal.example.com
+```
+
+Lookup order: per-method vars (`SOCKS5_PASSWD`, `HTTP_PROXY_PASSWORD`,
+`SOCKS5_PASSWORD`, `CONNECT_PASSWORD`) → `SSH_ASKPASS` (when
+`$DISPLAY` is set, Unix) → `/dev/tty` prompt. This matches
+`connect.c` exactly, so existing `askpass` scripts keep working.
+
+For repeated use, drop the per-method defaults into `~/.connectrc`:
+
+```
+socks5_server  = proxy.corp.example.com:1080
+socks5_user    = alice
+socks5_passwd  = secret
+http_proxy     = proxy.corp.example.com:3128
+```
+
+### Bypass local subnets
+
+`-D` enumerates local interface addresses (loopback, RFC1918, …) and
+adds them to the direct table. Without it, `ssh 10.0.0.5` would still
+go through the SOCKS proxy even if it's on your LAN:
+
+```
+Host *.internal.example.com
+    ProxyCommand sc -D -S proxy.corp.example.com:1080 %h %p
+```
+
+### Keep one proxy tunnel across many SSH connections
+
+`-P` (capital) keeps the remote side of the proxy open across multiple
+local connects. This is the same trick used by `nc -X` for SSH
+connection multiplexing — open the proxy once, then reuse it for every
+connection:
+
+```
+Host *.internal.example.com
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%r@%h:%p
+    ControlPersist 10m
+    ProxyCommand sc -P 1080 -S proxy.corp.example.com:1080 %h %p
+```
+
+(For most users, OpenSSH's native `ControlMaster` + `ProxyJump` is
+simpler and doesn't need `-P` — but `-P` is there for the
+`connect.c`-compatible use case.)
+
+### `connect-NNN` symlink trick
+
+If you want a single binary that defaults to a specific port (the way
+the `connect-NNN` basename trick works in `connect.c`):
+
+```sh
+ln -s $(which sc) ~/bin/connect-22
+# Now `~/bin/connect-22 host` defaults to port 22.
+```
+
+Useful in `ProxyCommand` lines where `ssh`'s `%p` doesn't help (e.g.
+when invoking the command from non-ssh contexts).
+
+### Caveats
+
+- `ssh` runs `ProxyCommand` once per connection (unless you use
+  `-P`). Don't expect the proxy tunnel to be reused implicitly.
+- The proxy host (`proxy.corp.example.com` in the examples) must be
+  reachable directly from your machine — `sc` does not tunnel itself
+  through another proxy.
+- `ProxyCommand` runs the binary with the privileges of the SSH
+  client; treat `sc` like a trusted shell tool. Don't make it
+  world-writable.
+
 ## Build
 
 ```sh
@@ -170,9 +310,11 @@ All 12 phases from `melodic-sparking-wombat.md` are complete:
 | 11 | `-R` switch_ns (Linux) + parameter files | ✅ |
 | 12 | Polish + README + tests | ✅ |
 
-37 unit tests cover the CLI parser, SOCKS4/4a/5 wire formats, HTTP
-CONNECT status parsing, TELNET template expansion, SSH_ASKPASS
-invocation, the parameter-file parser, and the direct-table parser.
+53 unit tests (and 4 end-to-end SOCKS5 integration tests) cover the
+CLI parser, SOCKS4/4a/5 wire formats, HTTP CONNECT status parsing,
+TELNET template expansion, SSH_ASKPASS invocation, the parameter-file
+parser, the direct-table parser, idle-timeout behaviour, and the
+listen-mode accept path.
 
 End-to-end smoke verified:
 
@@ -197,4 +339,8 @@ End-to-end smoke verified:
 
 ## License
 
-Same terms as the original `connect.c` (BSD-style).
+GPL-2.0-or-later. `sc` is a derivative of gotoh's
+[`connect.c`](https://github.com/gotoh/ssh-connect), which is licensed
+under the GNU General Public License version 2 or later; the same
+terms apply to this reimplementation. See [`LICENSE`](LICENSE) for the
+full text.
