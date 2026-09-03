@@ -150,11 +150,13 @@ async fn http_with_retry(mut cfg: sc::config::Config) -> Result<()> {
 fn debug_message(cfg: &sc::config::Config) {
     eprintln!(
         "DEBUG: relay_method = {} ({:?}), relay_host={:?}, relay_port={}, \
-         socks_version={}, socks_resolve={}, local_type={}",
+         dest={}:{}, socks_version={}, socks_resolve={}, local_type={}",
         cfg.relay_method.name(),
         cfg.relay_method,
         cfg.relay_host,
         cfg.relay_port,
+        cfg.dest_host,
+        cfg.dest_port,
         cfg.socks_version,
         cfg.socks_resolve.name(),
         cfg.local_type.name(),
