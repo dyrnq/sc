@@ -168,10 +168,10 @@ fn add_local_interfaces(table: &mut Vec<Entry>) -> usize {
                 if !ifa.ifa_name.is_null() {
                     // SAFETY: ifa_name is a valid C string.
                     let name = unsafe { CStr::from_ptr(ifa.ifa_name) };
-                    eprintln!(
-                        "DEBUG: -D adding local iface {} addr={:?}",
-                        name.to_string_lossy(),
-                        Ipv4Addr::from(u32::from_be(addr.sin_addr.s_addr)),
+                    tracing::debug!(
+                        iface = %name.to_string_lossy(),
+                        addr = %Ipv4Addr::from(u32::from_be(addr.sin_addr.s_addr)),
+                        "adding local interface to direct table",
                     );
                 }
                 added += 1;

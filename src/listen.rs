@@ -32,7 +32,7 @@ pub async fn accept_loop(cfg: &Config) -> Result<()> {
         }
     };
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
-    eprintln!("DEBUG: listening on 0.0.0.0:{port}");
+    tracing::debug!(port, "listening");
 
     if cfg.hold_session() {
         accept_loop_hold(listener, cfg).await

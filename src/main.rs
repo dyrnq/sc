@@ -48,9 +48,9 @@ async fn run(mut cfg: sc::config::Config) -> Result<()> {
     if cfg.relay_method != sc::config::ProxyMethod::Direct
         && direct_table::check_direct(&cfg.dest_host)
     {
-        eprintln!(
-            "DEBUG: bypassing proxy for {} (matched direct table)",
-            cfg.dest_host
+        tracing::debug!(
+            dest_host = %cfg.dest_host,
+            "bypassing proxy (matched direct table)",
         );
         cfg.relay_method = sc::config::ProxyMethod::Direct;
         cfg.relay_host = None;
@@ -114,7 +114,7 @@ fn init_direct_table(cfg: &sc::config::Config) {
     }
     let auto = cfg.f_auto_direct;
     match direct_table::initialize(&entries, auto) {
-        Ok(n) if n > 0 => eprintln!("DEBUG: direct table loaded {n} entries"),
+        Ok(n) if n > 0 => tracing::debug!(entries = n, "direct table loaded"),
         Ok(_) => {}
         Err(e) => tracing::error!("direct table: {e}"),
     }
