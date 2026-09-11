@@ -3,8 +3,7 @@
 //! `tracing` and `tracing-subscriber` are the canonical log facade for
 //! `sc`. Each `cfg.f_debug` step maps to a `tracing` level:
 //!
-//)
-// 1 → DEBUG, 2 → TRACE; otherwise `RUST_LOG` (or "off") wins. After init
+//! 1 → DEBUG, 2 → TRACE; otherwise `RUST_LOG` (or "off") wins. After init
 //! everything in the crate should use `tracing::*!` directly — there are
 //! no wrapper macros on purpose so call sites stay readable.
 

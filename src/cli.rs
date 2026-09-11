@@ -92,7 +92,7 @@ pub fn print_long_help() {
     eprint!("{LONG_HELP}");
 }
 
-/// Entry point: parse `argv` (including argv[0]) and return a Config.
+/// Entry point: parse `argv` (including argv\[0\]) and return a Config.
 pub fn parse(argv: &[String]) -> Result<Config> {
     if argv.len() < 2 {
         print_usage();

@@ -70,7 +70,7 @@ pub async fn readpass(prompt: &str, method: ProxyMethod, socks_version: u8) -> R
     crate::tty::tty_readpass(prompt)
 }
 
-/// Spawn `SSH_ASKPASS` with `prompt` as its argv[1], read the first line
+/// Spawn `SSH_ASKPASS` with `prompt` as its argv\[1\], read the first line
 /// of its stdout as the password.
 async fn ssh_askpass(prompt: &str, program: &str) -> Result<String> {
     let output = tokio::process::Command::new(program)
