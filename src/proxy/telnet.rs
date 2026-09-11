@@ -10,7 +10,7 @@
 //!      " closed" → handshake fails
 //! 3. EOF before either match → error.
 
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
 use crate::config::Config;
@@ -89,7 +89,7 @@ pub async fn begin(stream: &mut TcpStream, cfg: &Config) -> Result<()> {
     let mut line = String::new();
     loop {
         line.clear();
-        if read_line(stream, &mut line).await? {
+        if super::util::read_crlf_line(stream, &mut line).await? {
             // EOF.
             return Err(Error::Telnet("EOF reading proxy response".into()));
         }
@@ -109,29 +109,10 @@ pub async fn begin(stream: &mut TcpStream, cfg: &Config) -> Result<()> {
     }
 }
 
-/// Read one CRLF-terminated line into `buf`. Returns `Ok(true)` on EOF,
-/// `Ok(false)` on a normal line read.
-async fn read_line<R: AsyncRead + Unpin>(r: &mut R, buf: &mut String) -> Result<bool> {
-    buf.clear();
-    let mut byte = [0u8; 1];
-    loop {
-        let n = r.read(&mut byte).await?;
-        if n == 0 {
-            // EOF.
-            return Ok(true);
-        }
-        if byte[0] == b'\n' {
-            return Ok(false);
-        }
-        if byte[0] != b'\r' {
-            buf.push(byte[0] as char);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncReadExt;
 
     #[test]
     fn expand_basic() {

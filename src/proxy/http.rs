@@ -9,7 +9,7 @@
 //!
 //! The caller (main) is responsible for reconnecting on `Retry`.
 
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
 use crate::config::{Config, ProxyAuthType};
@@ -76,28 +76,9 @@ async fn send_request(stream: &mut TcpStream, cfg: &Config) -> Result<()> {
 
 /// Read one CRLF-terminated line into `buf`. Returns when `\n` is seen or
 /// when EOF is reached. `buf` is cleared first.
-async fn read_line<R: AsyncRead + Unpin>(r: &mut R, buf: &mut String) -> Result<()> {
-    buf.clear();
-    let mut byte = [0u8; 1];
-    loop {
-        let n = r.read(&mut byte).await?;
-        if n == 0 {
-            // EOF. If we already accumulated some chars, treat as a line;
-            // otherwise it's truly empty.
-            return Ok(());
-        }
-        if byte[0] == b'\n' {
-            return Ok(());
-        }
-        if byte[0] != b'\r' {
-            buf.push(byte[0] as char);
-        }
-    }
-}
-
 async fn read_status_line(stream: &mut TcpStream) -> Result<u16> {
     let mut line = String::new();
-    read_line(stream, &mut line).await?;
+    super::util::read_crlf_line(stream, &mut line).await?;
     let code: u16 = line
         .split_whitespace()
         .nth(1)
@@ -110,7 +91,7 @@ async fn drain_headers(stream: &mut TcpStream) -> Result<()> {
     let mut line = String::new();
     loop {
         line.clear();
-        read_line(stream, &mut line).await?;
+        super::util::read_crlf_line(stream, &mut line).await?;
         if line.is_empty() {
             return Ok(());
         }
@@ -123,7 +104,7 @@ async fn parse_location_for_redirect(stream: &mut TcpStream, cfg: &mut Config) -
     let mut new_port: u16 = 0;
     loop {
         line.clear();
-        read_line(stream, &mut line).await?;
+        super::util::read_crlf_line(stream, &mut line).await?;
         if line.is_empty() {
             break;
         }
@@ -159,7 +140,7 @@ async fn parse_auth_challenge(stream: &mut TcpStream) -> Result<()> {
     let mut found = false;
     loop {
         line.clear();
-        read_line(stream, &mut line).await?;
+        super::util::read_crlf_line(stream, &mut line).await?;
         if line.is_empty() {
             break;
         }
@@ -179,18 +160,7 @@ async fn parse_auth_challenge(stream: &mut TcpStream) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
-
-    #[tokio::test]
-    async fn read_line_basic() {
-        let mut c = Cursor::new(b"hello\r\nworld\r\n".to_vec());
-        let mut s = String::new();
-        read_line(&mut c, &mut s).await.unwrap();
-        assert_eq!(s, "hello");
-        s.clear();
-        read_line(&mut c, &mut s).await.unwrap();
-        assert_eq!(s, "world");
-    }
+    use tokio::io::AsyncReadExt;
 
     #[tokio::test]
     async fn http_200_roundtrip() {
