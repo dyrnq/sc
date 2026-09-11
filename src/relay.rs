@@ -112,7 +112,7 @@ where
             }
         }
         r = &mut r2l => {
-            if let Err(e) = &r { tracing::error!("relay remote→remote: {e}"); }
+            if let Err(e) = &r { tracing::error!("relay remote→local: {e}"); }
         }
     }
     Ok(())
