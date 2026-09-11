@@ -47,8 +47,10 @@ static TABLE: std::sync::LazyLock<Mutex<HashMap<String, String>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Read the system `/etc/connectrc` then the user's `~/.connectrc`. Later
-/// files overwrite earlier ones.
-pub fn read_all() -> Result<()> {
+/// files overwrite earlier ones. Per-file failures are traced at debug
+/// level and skipped — this call is infallible and intended to run
+/// unconditionally at startup.
+pub fn read_all() {
     let mut table = TABLE.lock().unwrap();
     table.clear();
 
@@ -64,7 +66,6 @@ pub fn read_all() -> Result<()> {
             tracing::debug!("{path}: {e}");
         }
     }
-    Ok(())
 }
 
 #[cfg(unix)]
@@ -163,5 +164,159 @@ mod tests {
         let mut t = HashMap::new();
         parse_line("test", 1, "no equals sign", &mut t);
         assert!(t.is_empty());
+    }
+
+    /// `getparam` is env-first, so when both are set the env value wins.
+    /// Pin the precedence so a future refactor can't silently flip it.
+    #[test]
+    fn getparam_env_wins_over_file() {
+        // SAFETY: this test owns these env vars during its run.
+        unsafe {
+            std::env::set_var("socks4_resolve", "from-env");
+        }
+        let prev = TABLE
+            .lock()
+            .unwrap()
+            .insert("socks4_resolve".into(), "from-file".into());
+
+        assert_eq!(getparam("socks4_resolve").as_deref(), Some("from-env"));
+
+        // Cleanup.
+        unsafe {
+            std::env::remove_var("socks4_resolve");
+        }
+        let mut t = TABLE.lock().unwrap();
+        match prev {
+            Some(v) => {
+                t.insert("socks4_resolve".into(), v);
+            }
+            None => {
+                t.remove("socks4_resolve");
+            }
+        }
+    }
+
+    /// When the env var is unset (or empty) `getparam` falls back to the
+    /// value that `read_all` populated from `.connectrc`.
+    #[test]
+    fn getparam_falls_back_to_file_table() {
+        // SAFETY: this test owns these env vars during its run.
+        unsafe {
+            std::env::remove_var("connect_direct");
+        }
+        let prev = TABLE
+            .lock()
+            .unwrap()
+            .insert("connect_direct".into(), "from-file".into());
+
+        assert_eq!(getparam("connect_direct").as_deref(), Some("from-file"));
+
+        // Cleanup.
+        let mut t = TABLE.lock().unwrap();
+        match prev {
+            Some(v) => {
+                t.insert("connect_direct".into(), v);
+            }
+            None => {
+                t.remove("connect_direct");
+            }
+        }
+    }
+
+    /// An empty env var should NOT shadow a real file-table value
+    /// (`getparam` treats empty env vars as unset, matching
+    /// `connect.c::getparam` semantics).
+    #[test]
+    fn getparam_empty_env_does_not_shadow_file_value() {
+        // SAFETY: this test owns these env vars during its run.
+        unsafe {
+            std::env::set_var("socks5_resolve", "");
+        }
+        let prev = TABLE
+            .lock()
+            .unwrap()
+            .insert("socks5_resolve".into(), "from-file".into());
+
+        assert_eq!(getparam("socks5_resolve").as_deref(), Some("from-file"));
+
+        // Cleanup.
+        unsafe {
+            std::env::remove_var("socks5_resolve");
+        }
+        let mut t = TABLE.lock().unwrap();
+        match prev {
+            Some(v) => {
+                t.insert("socks5_resolve".into(), v);
+            }
+            None => {
+                t.remove("socks5_resolve");
+            }
+        }
+    }
+
+    /// End-to-end: `read_all` reads `/etc/connectrc` then a temp
+    /// `~/.connectrc`, and `getparam` surfaces the file value when env
+    /// is unset. Uses keys unique to this test to avoid races with the
+    /// parallel unit tests that mutate `TABLE` / env directly.
+    #[cfg(unix)]
+    #[test]
+    fn read_all_loads_connectrc_end_to_end() {
+        let dir = std::env::temp_dir().join(format!("sc-connectrc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rc = dir.join(".connectrc");
+        // Use keys that no other test touches and that are in KNOWN_KEYS.
+        std::fs::write(
+            &rc,
+            "http_proxy = proxy.corp:8080\nssh_askpass = /usr/bin/ssh-askpass\n",
+        )
+        .unwrap();
+
+        let prev_home = std::env::var("HOME").ok();
+        // SAFETY: this test owns HOME during its run.
+        unsafe {
+            std::env::set_var("HOME", &dir);
+        }
+
+        // Snapshot TABLE entries we'll touch, so we can restore them.
+        let prev_http_proxy = TABLE.lock().unwrap().remove("http_proxy");
+        let prev_ssh_askpass = TABLE.lock().unwrap().remove("ssh_askpass");
+        // SAFETY: this test owns these env vars during its run.
+        unsafe {
+            std::env::remove_var("http_proxy");
+            std::env::remove_var("SSH_ASKPASS");
+        }
+
+        read_all();
+
+        assert_eq!(
+            getparam("http_proxy").as_deref(),
+            Some("proxy.corp:8080"),
+            "http_proxy from .connectrc should be visible via getparam"
+        );
+        assert_eq!(
+            getparam("ssh_askpass").as_deref(),
+            Some("/usr/bin/ssh-askpass"),
+            "ssh_askpass from .connectrc should be visible via getparam"
+        );
+
+        // Restore HOME and TABLE.
+        // SAFETY: restoring prior HOME for the test process.
+        unsafe {
+            match prev_home {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+        let mut t = TABLE.lock().unwrap();
+        if let Some(v) = prev_http_proxy {
+            t.insert("http_proxy".into(), v);
+        }
+        if let Some(v) = prev_ssh_askpass {
+            t.insert("ssh_askpass".into(), v);
+        }
+
+        // Best-effort cleanup of the temp dir.
+        let _ = std::fs::remove_file(&rc);
+        let _ = std::fs::remove_dir(&dir);
     }
 }

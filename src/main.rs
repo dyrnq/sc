@@ -11,7 +11,9 @@ async fn main() {
     let argv: Vec<String> = std::env::args().collect();
     // Read parameter files (/etc/connectrc, ~/.connectrc) before CLI
     // parsing — connect.c applies env-vars on top of the file table.
-    let _ = sc::parameters::read_all();
+    // Per-file failures are reported via tracing::debug; this call is
+    // infallible.
+    sc::parameters::read_all();
 
     let cfg = match cli::parse(&argv) {
         Ok(c) => c,
@@ -84,7 +86,8 @@ fn idle_timeout(cfg: &sc::config::Config) -> Option<Duration> {
 }
 
 /// Initialise the direct-table bypass list from `*_DIRECT` env vars
-/// (per-method) plus `-D` (auto-add local interface addresses).
+/// (per-method) plus `-D` (auto-add local interface addresses). Keys are
+/// routed through `parameters::getparam` so `.connectrc` is honoured.
 fn init_direct_table(cfg: &sc::config::Config) {
     use sc::config::ProxyMethod;
     let key = match cfg.relay_method {
@@ -95,11 +98,11 @@ fn init_direct_table(cfg: &sc::config::Config) {
     };
     let mut entries: Vec<String> = Vec::new();
     if !key.is_empty()
-        && let Ok(s) = std::env::var(key)
+        && let Some(s) = sc::parameters::getparam(key)
     {
         entries.extend(s.split(',').map(str::to_string));
     }
-    if let Ok(s) = std::env::var("CONNECT_DIRECT") {
+    if let Some(s) = sc::parameters::getparam("CONNECT_DIRECT") {
         entries.extend(s.split(',').map(str::to_string));
     }
     let auto = cfg.f_auto_direct;

@@ -9,15 +9,28 @@ use crate::error::{Error, Result};
 /// Look up the proxy username for the given method, considering env vars
 /// (per-method → `CONNECT_USER` → `LOGNAME` → `USER`) and finally the system
 /// account via `getlogin` (Unix only). Matches `connect.c` line 173-175.
+///
+/// Proxy-specific keys are routed through `parameters::getparam` so
+/// `.connectrc` / `/etc/connectrc` values work as a fallback below the
+/// env vars. `LOGNAME` / `USER` stay as raw `env::var` since they
+/// identify the *system* account, not a proxy configuration entry.
 pub fn determine_relay_user(method: ProxyMethod, socks_version: u8) -> Result<Option<String>> {
-    const FALLBACK: &[&str] = &["LOGNAME", "USER"];
     let candidates: &[&str] = match method {
         ProxyMethod::Socks if socks_version == 5 => &["SOCKS5_USER", "SOCKS_USER", "CONNECT_USER"],
         ProxyMethod::Socks => &["SOCKS4_USER", "SOCKS_USER", "CONNECT_USER"],
         ProxyMethod::Http => &["HTTP_PROXY_USER", "CONNECT_USER"],
         ProxyMethod::Telnet | ProxyMethod::Direct | ProxyMethod::Undecided => &["CONNECT_USER"],
     };
-    for name in candidates.iter().chain(FALLBACK) {
+    // Proxy keys: env wins, fall back to connectrc.
+    for name in candidates {
+        if let Some(v) = crate::parameters::getparam(name)
+            && !v.is_empty()
+        {
+            return Ok(Some(v));
+        }
+    }
+    // System account: env only (LOGNAME/USER are POSIX, not proxy config).
+    for name in ["LOGNAME", "USER"] {
         if let Ok(v) = std::env::var(name)
             && !v.is_empty()
         {
@@ -28,8 +41,9 @@ pub fn determine_relay_user(method: ProxyMethod, socks_version: u8) -> Result<Op
     Ok(Some(system_username()))
 }
 
-/// Look up the proxy password from env vars. Returns `None` if no env var
-/// is set; the caller then falls back to `readpass`.
+/// Look up the proxy password from env vars, with `.connectrc` /
+/// `/etc/connectrc` as fallback. Returns `None` if nothing is set; the
+/// caller then falls back to `readpass`.
 pub fn env_password(method: ProxyMethod, _socks_version: u8) -> Option<String> {
     let candidates: &[&str] = match method {
         ProxyMethod::Socks => &["SOCKS5_PASSWD", "SOCKS5_PASSWORD", "CONNECT_PASSWORD"],
@@ -37,7 +51,7 @@ pub fn env_password(method: ProxyMethod, _socks_version: u8) -> Option<String> {
         _ => &["CONNECT_PASSWORD"],
     };
     for name in candidates {
-        if let Ok(v) = std::env::var(name)
+        if let Some(v) = crate::parameters::getparam(name)
             && !v.is_empty()
         {
             return Some(v);

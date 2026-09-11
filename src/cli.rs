@@ -348,7 +348,8 @@ impl ArgParser {
         Ok(())
     }
 
-    /// Resolve defaults from env vars. Mirrors `connect.c::set_relay`.
+    /// Resolve defaults from env vars, with `.connectrc` / `/etc/connectrc`
+    /// as fallback. Mirrors `connect.c::set_relay`.
     fn finalise(&mut self) -> Result<()> {
         // `-s` / `-h` / `-t` without an explicit relay spec: pull from env.
         if matches!(self.cfg.relay_method, ProxyMethod::Socks) && self.cfg.relay_host.is_none() {
@@ -357,19 +358,21 @@ impl ArgParser {
                 4 => "SOCKS4_SERVER",
                 _ => "SOCKS_SERVER",
             };
-            if let Ok(spec) = std::env::var(env_name).or_else(|_| std::env::var("SOCKS_SERVER")) {
+            if let Some(spec) = crate::parameters::getparam(env_name)
+                .or_else(|| crate::parameters::getparam("SOCKS_SERVER"))
+            {
                 parse_relay_spec(&spec, ProxyMethod::Socks, &mut self.cfg)?;
             }
         }
         if matches!(self.cfg.relay_method, ProxyMethod::Http)
             && self.cfg.relay_host.is_none()
-            && let Ok(spec) = std::env::var("HTTP_PROXY")
+            && let Some(spec) = crate::parameters::getparam("HTTP_PROXY")
         {
             parse_relay_spec(&spec, ProxyMethod::Http, &mut self.cfg)?;
         }
         if matches!(self.cfg.relay_method, ProxyMethod::Telnet)
             && self.cfg.relay_host.is_none()
-            && let Ok(spec) = std::env::var("TELNET_PROXY")
+            && let Some(spec) = crate::parameters::getparam("TELNET_PROXY")
         {
             parse_relay_spec(&spec, ProxyMethod::Telnet, &mut self.cfg)?;
         }
