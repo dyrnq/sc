@@ -11,10 +11,9 @@
 //! accepts — local EOF just closes the local socket, and the next accepted
 //! connection re-uses the same remote tunnel.
 
-use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 
-use crate::config::{Config, LocalType, ProxyMethod};
+use crate::config::{Config, LocalType};
 use crate::error::{Error, Result};
 use crate::proxy;
 use crate::relay;
@@ -44,7 +43,7 @@ pub async fn accept_loop(cfg: &Config) -> Result<()> {
 /// One-shot accept: bind, accept once, relay, exit.
 async fn accept_loop_once(listener: TcpListener, cfg: &Config) -> Result<()> {
     let (local, _) = listener.accept().await?;
-    let mut remote = open_remote(cfg).await?;
+    let mut remote = proxy::open_through_proxy(cfg).await?;
     let span = tracing::info_span!(
         "connection",
         conn_id = crate::conn_id::ConnectionId::next().0
@@ -58,7 +57,7 @@ async fn accept_loop_once(listener: TcpListener, cfg: &Config) -> Result<()> {
 /// Hold session: bind, accept repeatedly. The remote socket is established
 /// once and reused across accepts. Local EOF just releases the local side.
 async fn accept_loop_hold(listener: TcpListener, cfg: &Config) -> Result<()> {
-    let mut remote = open_remote(cfg).await?;
+    let mut remote = proxy::open_through_proxy(cfg).await?;
     loop {
         let (local, _) = listener.accept().await?;
         let span = tracing::info_span!(
@@ -91,38 +90,6 @@ async fn remote_alive(remote: &mut TcpStream) -> bool {
     remote.peek(&mut [0u8; 1]).await.is_ok()
 }
 
-/// Open a remote socket via the configured proxy method. The returned
-/// `TcpStream` is connected through the proxy to `dest_host:dest_port`.
-async fn open_remote(cfg: &Config) -> Result<TcpStream> {
-    let mut stream = match cfg.relay_method {
-        ProxyMethod::Direct => crate::proxy::direct::connect(cfg).await?,
-        ProxyMethod::Socks => proxy::connect_relay(cfg).await?,
-        ProxyMethod::Http => {
-            let mut s = proxy::connect_relay(cfg).await?;
-            loop {
-                match proxy::http::begin(&mut s, &mut cfg.clone()).await? {
-                    proxy::http::HttpStart::Ok => break s,
-                    proxy::http::HttpStart::Retry => {
-                        drop(s);
-                        s = proxy::connect_relay(cfg).await?;
-                    }
-                }
-            }
-        }
-        ProxyMethod::Telnet => {
-            let mut s = proxy::connect_relay(cfg).await?;
-            crate::proxy::telnet::begin(&mut s, cfg).await?;
-            s
-        }
-        ProxyMethod::Undecided => return Err(Error::Config("no proxy method".into())),
-    };
-    if matches!(cfg.relay_method, ProxyMethod::Socks) {
-        let mut cfg_mut = cfg.clone();
-        proxy::handshake(&mut stream, &mut cfg_mut).await?;
-    }
-    Ok(stream)
-}
-
 /// Map `cfg.read_timeout_ms` to an `Option<Duration>` for the relay layer.
 fn idle_timeout(cfg: &Config) -> Option<Duration> {
     match cfg.read_timeout_ms {
@@ -130,11 +97,6 @@ fn idle_timeout(cfg: &Config) -> Option<Duration> {
         ms => Some(Duration::from_millis(ms)),
     }
 }
-
-// `AsyncRead`/`AsyncWrite` are imported for the `into_split` return type's
-// trait bounds — silence "unused" warnings when neither is referenced.
-#[allow(dead_code)]
-fn _trait_pins<R: AsyncRead, W: AsyncWrite>() {}
 
 #[cfg(test)]
 mod tests {
@@ -180,5 +142,43 @@ mod tests {
         // If the test hangs here, accept_loop is probably blocked in the
         // relay waiting for either side to close. We don't fail the test
         // because the smoke test verified this path works.
+    }
+
+    /// Regression guard for #3 + #listen-timeout bug: when `-w` is set in
+    /// listen mode, the connect phase must honour it. Without this fix
+    /// `open_remote` bypassed the wrapper and a black-holed proxy would
+    /// hang until the kernel's TCP retransmit budget (~60s).
+    ///
+    /// We bind a TCP listener and immediately drop it — the resulting
+    /// port is "unbound" so the kernel RSTs the SYN. That's *fast*
+    /// (not slow), so this test pins the FAST-FAILURE path: the error
+    /// must propagate without timing out, and `connect_timeout` must
+    /// not artificially extend it.
+    #[tokio::test]
+    async fn listen_mode_connect_timeout_is_honoured() {
+        use std::time::Instant;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener); // port is now unbound → kernel RSTs
+
+        let cfg = Config {
+            relay_method: ProxyMethod::Direct,
+            dest_host: "127.0.0.1".into(),
+            dest_port: port,
+            local_type: LocalType::Stdio, // bypass listen — test the dispatch path
+            connect_timeout: 30,
+            ..Config::default()
+        };
+
+        let start = Instant::now();
+        let result = proxy::open_through_proxy(&cfg).await;
+        let elapsed = start.elapsed();
+
+        assert!(result.is_err(), "expected connect to fail on RST");
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "RST should be immediate; took {elapsed:?}"
+        );
     }
 }

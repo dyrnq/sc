@@ -3,7 +3,7 @@
 //! Phases 1-10: all proxy methods + listen + hold + direct-table bypass
 //! (env entries and `-D` local-interface auto-add) + `-w` connect timeout.
 
-use sc::{Error, Result, cli, config::LocalType, conn_id, direct_table, proxy, relay};
+use sc::{Result, cli, config::LocalType, conn_id, direct_table, proxy, relay};
 use std::time::Duration;
 
 #[tokio::main(flavor = "current_thread")]
@@ -65,22 +65,12 @@ async fn run(mut cfg: sc::config::Config) -> Result<()> {
     // log lines show up tagged identically to the listen path.
     let _conn = conn_id::span(conn_id::ConnectionId::next());
 
-    use sc::config::ProxyMethod;
-
-    let mut stream = match cfg.relay_method {
-        ProxyMethod::Direct => open_with_timeout(&cfg, open_direct(&cfg)).await?,
-        ProxyMethod::Socks => open_with_timeout(&cfg, open_relay_only(&cfg)).await?,
-        ProxyMethod::Http => return http_with_retry(cfg).await,
-        ProxyMethod::Telnet => {
-            let mut s = open_with_timeout(&cfg, open_relay_only(&cfg)).await?;
-            crate::proxy::telnet::begin(&mut s, &cfg).await?;
-            return relay::relay_stdio(s, idle_timeout(&cfg)).await;
-        }
-        ProxyMethod::Undecided => return Err(Error::Config("no proxy method".into())),
-    };
     debug_message(&cfg);
 
-    proxy::handshake(&mut stream, &mut cfg).await?;
+    // open_through_proxy honours cfg.connect_timeout for the initial TCP
+    // connect (the `-w` flag) and runs the protocol handshake to the
+    // end; the returned stream is ready for the relay.
+    let stream = proxy::open_through_proxy(&cfg).await?;
     relay::relay_stdio(stream, idle_timeout(&cfg)).await
 }
 
@@ -118,48 +108,6 @@ fn init_direct_table(cfg: &sc::config::Config) {
         Ok(_) => {}
         Err(e) => tracing::error!("direct table: {e}"),
     }
-}
-
-/// Wrapper that applies `cfg.connect_timeout` (when set) to the open
-/// future. Mirrors connect.c's SIGALRM.
-async fn open_with_timeout<F>(cfg: &sc::config::Config, f: F) -> Result<tokio::net::TcpStream>
-where
-    F: std::future::Future<Output = Result<tokio::net::TcpStream>>,
-{
-    if cfg.connect_timeout > 0 {
-        let secs = cfg.connect_timeout as u64;
-        match tokio::time::timeout(Duration::from_secs(secs), f).await {
-            Ok(r) => r,
-            Err(_) => Err(Error::Config(format!("connect timeout after {secs}s"))),
-        }
-    } else {
-        f.await
-    }
-}
-
-async fn open_direct(cfg: &sc::config::Config) -> Result<tokio::net::TcpStream> {
-    proxy::direct::connect(cfg).await
-}
-
-async fn open_relay_only(cfg: &sc::config::Config) -> Result<tokio::net::TcpStream> {
-    proxy::connect_relay(cfg).await
-}
-
-/// HTTP CONNECT with redirect / auth-challenge retry. Mirrors the
-/// `goto retry` pattern in `connect.c` (lines 3033-3037).
-async fn http_with_retry(mut cfg: sc::config::Config) -> Result<()> {
-    let mut stream = open_with_timeout(&cfg, open_relay_only(&cfg)).await?;
-    debug_message(&cfg);
-    loop {
-        match proxy::http::begin(&mut stream, &mut cfg).await? {
-            proxy::http::HttpStart::Ok => break,
-            proxy::http::HttpStart::Retry => {
-                drop(stream);
-                stream = open_with_timeout(&cfg, open_relay_only(&cfg)).await?;
-            }
-        }
-    }
-    relay::relay_stdio(stream, idle_timeout(&cfg)).await
 }
 
 fn debug_message(cfg: &sc::config::Config) {
