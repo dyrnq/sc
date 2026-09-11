@@ -26,6 +26,28 @@ enum Entry {
     Negative(Box<Entry>),
 }
 
+impl Entry {
+    /// Does this entry match `host` (and its resolved `ip`, if any)?
+    /// `Negative` inverts its inner; recursive negation is fine because
+    /// `parse_entry` only produces one level of wrapping.
+    fn matches(&self, host: &str, ip: Option<Ipv4Addr>) -> bool {
+        match self {
+            Entry::Cidr { addr, mask } => ip
+                .map(|i| (u32::from(i) & mask) == (addr & mask))
+                .unwrap_or(false),
+            Entry::Domain { name, suffix_only } => {
+                let lower = host.to_ascii_lowercase();
+                if *suffix_only {
+                    lower.len() > name.len() && lower.ends_with(name)
+                } else {
+                    lower == *name
+                }
+            }
+            Entry::Negative(inner) => !inner.matches(host, ip),
+        }
+    }
+}
+
 /// Global direct table. Mutex-protected because `-D` enumeration and
 /// env-var parsing happen at startup, and `check_direct` may be called
 /// from any proxy path. In our model only startup mutates it, but the
@@ -196,58 +218,13 @@ fn add_local_interfaces(_table: &mut Vec<Entry>) -> usize {
     0
 }
 
-/// Decide whether `host` should bypass the proxy.
-///
-/// For now this returns false unless a CIDR matches a numeric IP. Hostname
-/// matching against the table is deferred to Phase 12 polish.
+/// Decide whether `host` should bypass the proxy. Domain entries match
+/// `connect.c`'s `check_host` (case-insensitive exact or subdomain match);
+/// `!`-prefixed entries negate their inner match.
 pub fn check_direct(host: &str) -> bool {
     let table = TABLE.lock().unwrap();
     let ip = host.parse::<Ipv4Addr>().ok();
-    for entry in table.iter() {
-        match entry {
-            Entry::Cidr { addr, mask } => {
-                if let Some(ip) = ip {
-                    let v = u32::from(ip);
-                    if (v & mask) == (addr & mask) {
-                        return true;
-                    }
-                }
-            }
-            Entry::Domain { name, suffix_only } => {
-                let lower = host.to_ascii_lowercase();
-                if *suffix_only {
-                    if lower.ends_with(name) && lower.len() > name.len() {
-                        return true;
-                    }
-                } else if lower == *name {
-                    return true;
-                }
-            }
-            Entry::Negative(inner) => {
-                if !matches!(inner.as_ref(), Entry::Cidr { .. } | Entry::Domain { .. }) {
-                    continue;
-                }
-                let inner_match = match inner.as_ref() {
-                    Entry::Cidr { addr, mask } => ip
-                        .map(|i| (u32::from(i) & mask) == (addr & mask))
-                        .unwrap_or(false),
-                    Entry::Domain { name, suffix_only } => {
-                        let lower = host.to_ascii_lowercase();
-                        if *suffix_only {
-                            lower.len() > name.len() && lower.ends_with(name)
-                        } else {
-                            lower == *name
-                        }
-                    }
-                    _ => false,
-                };
-                if !inner_match {
-                    return true;
-                }
-            }
-        }
-    }
-    false
+    table.iter().any(|e| e.matches(host, ip))
 }
 
 // ---- sockaddr helpers ----
@@ -295,5 +272,31 @@ mod tests {
         assert!(check_direct("10.0.0.1"));
         assert!(check_direct("192.168.1.42"));
         assert!(!check_direct("8.8.8.8"));
+    }
+
+    /// Domain matching: exact (case-insensitive) and suffix-only (`*.host`).
+    /// `suffix_only` requires the host to be strictly longer than the
+    /// suffix so that `*.example.com` doesn't match `example.com` itself.
+    #[test]
+    fn check_direct_domain_match() {
+        initialize(&["example.com".into(), ".internal.corp".into()], false).unwrap();
+        assert!(check_direct("example.com"));
+        assert!(check_direct("EXAMPLE.COM"));
+        assert!(!check_direct("example.org"));
+
+        assert!(check_direct("svc.internal.corp"));
+        assert!(!check_direct("internal.corp")); // suffix-only, not equal
+        assert!(!check_direct("corp"));
+    }
+
+    /// Negative domain: matches everything *except* the listed host.
+    /// Mirrors `connect.c::check_host` returning true when the host
+    /// is NOT in the table.
+    #[test]
+    fn check_direct_negative_domain() {
+        initialize(&["!blocked.example".into()], false).unwrap();
+        assert!(check_direct("allowed.example"));
+        assert!(check_direct("anything.else"));
+        assert!(!check_direct("blocked.example"));
     }
 }
