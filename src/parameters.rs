@@ -43,7 +43,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "socks5_auth",
 ];
 
-static TABLE: std::sync::LazyLock<Mutex<HashMap<String, String>>> =
+pub(crate) static TABLE: std::sync::LazyLock<Mutex<HashMap<String, String>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Read the system `/etc/connectrc` then the user's `~/.connectrc`. Later
@@ -132,6 +132,17 @@ pub fn getparam(name: &str) -> Option<String> {
     TABLE.lock().unwrap().get(name).cloned()
 }
 
+/// Test-only helper: insert a value into the file table and return the
+/// previous value (if any). Production callers should always set
+/// values through `read_all` + a real `.connectrc`.
+#[cfg(test)]
+pub fn _insert_for_test(name: &str, value: &str) -> Option<String> {
+    TABLE
+        .lock()
+        .unwrap()
+        .insert(name.to_string(), value.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,6 +177,37 @@ mod tests {
         assert!(t.is_empty());
     }
 
+    /// Realistic `.connectrc` body: header comment, blank line,
+    /// several keys (some with surrounding whitespace), a trailing
+    /// comment, and an empty line at EOF. Every known key should
+    /// land in the table with trimmed value.
+    #[test]
+    fn parse_line_mixed_comments_and_keys() {
+        let mut t = HashMap::new();
+        parse_line("test", 1, "# header comment", &mut t);
+        parse_line("test", 2, "", &mut t);
+        parse_line("test", 3, "socks5_server = 10.0.0.1:1080", &mut t);
+        parse_line("test", 4, "http_proxy=proxy.corp:8080", &mut t);
+        parse_line("test", 5, "   socks5_user\t=\talice  ", &mut t);
+        parse_line("test", 6, "", &mut t);
+        parse_line("test", 7, "  # indented comment", &mut t);
+        parse_line(
+            "test",
+            8,
+            "socks5_direct = 10.0.0.0/8,192.168.0.0/16",
+            &mut t,
+        );
+
+        assert_eq!(t.get("socks5_server"), Some(&"10.0.0.1:1080".into()));
+        assert_eq!(t.get("http_proxy"), Some(&"proxy.corp:8080".into()));
+        assert_eq!(t.get("socks5_user"), Some(&"alice".into()));
+        assert_eq!(
+            t.get("socks5_direct"),
+            Some(&"10.0.0.0/8,192.168.0.0/16".into())
+        );
+        assert_eq!(t.len(), 4);
+    }
+
     /// `getparam` is env-first, so when both are set the env value wins.
     /// Pin the precedence so a future refactor can't silently flip it.
     #[test]
@@ -174,10 +216,7 @@ mod tests {
         unsafe {
             std::env::set_var("socks4_resolve", "from-env");
         }
-        let prev = TABLE
-            .lock()
-            .unwrap()
-            .insert("socks4_resolve".into(), "from-file".into());
+        let prev = _insert_for_test("socks4_resolve", "from-file");
 
         assert_eq!(getparam("socks4_resolve").as_deref(), Some("from-env"));
 
@@ -204,10 +243,7 @@ mod tests {
         unsafe {
             std::env::remove_var("connect_direct");
         }
-        let prev = TABLE
-            .lock()
-            .unwrap()
-            .insert("connect_direct".into(), "from-file".into());
+        let prev = _insert_for_test("connect_direct", "from-file");
 
         assert_eq!(getparam("connect_direct").as_deref(), Some("from-file"));
 
@@ -232,10 +268,7 @@ mod tests {
         unsafe {
             std::env::set_var("socks5_resolve", "");
         }
-        let prev = TABLE
-            .lock()
-            .unwrap()
-            .insert("socks5_resolve".into(), "from-file".into());
+        let prev = _insert_for_test("socks5_resolve", "from-file");
 
         assert_eq!(getparam("socks5_resolve").as_deref(), Some("from-file"));
 

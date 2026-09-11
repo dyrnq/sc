@@ -43,7 +43,7 @@ async fn run(mut cfg: sc::config::Config) -> Result<()> {
     }
 
     // Initialise the direct-table bypass list from env vars and -D.
-    init_direct_table(&cfg);
+    direct_table::init_from_config(&cfg);
 
     // If the destination matches a direct-table entry, override the
     // proxy method to Direct. (Only meaningful when a proxy is set.)
@@ -82,34 +82,6 @@ fn idle_timeout(cfg: &sc::config::Config) -> Option<Duration> {
     match cfg.read_timeout_ms {
         0 => None,
         ms => Some(Duration::from_millis(ms)),
-    }
-}
-
-/// Initialise the direct-table bypass list from `*_DIRECT` env vars
-/// (per-method) plus `-D` (auto-add local interface addresses). Keys are
-/// routed through `parameters::getparam` so `.connectrc` is honoured.
-fn init_direct_table(cfg: &sc::config::Config) {
-    use sc::config::ProxyMethod;
-    let key = match cfg.relay_method {
-        ProxyMethod::Socks if cfg.socks_version == 5 => "SOCKS5_DIRECT",
-        ProxyMethod::Socks => "SOCKS4_DIRECT",
-        ProxyMethod::Http => "HTTP_DIRECT",
-        ProxyMethod::Telnet | ProxyMethod::Direct | ProxyMethod::Undecided => "",
-    };
-    let mut entries: Vec<String> = Vec::new();
-    if !key.is_empty()
-        && let Some(s) = sc::parameters::getparam(key)
-    {
-        entries.extend(s.split(',').map(str::to_string));
-    }
-    if let Some(s) = sc::parameters::getparam("CONNECT_DIRECT") {
-        entries.extend(s.split(',').map(str::to_string));
-    }
-    let auto = cfg.f_auto_direct;
-    match direct_table::initialize(&entries, auto) {
-        Ok(n) if n > 0 => tracing::debug!(entries = n, "direct table loaded"),
-        Ok(_) => {}
-        Err(e) => tracing::error!("direct table: {e}"),
     }
 }
 

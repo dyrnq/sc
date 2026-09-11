@@ -16,6 +16,7 @@
 use std::net::Ipv4Addr;
 use std::sync::Mutex;
 
+use crate::config::Config;
 use crate::error::Result;
 
 /// A single direct-table entry.
@@ -152,6 +153,36 @@ pub fn initialize(entries: &[String], auto_local: bool) -> Result<usize> {
     Ok(added)
 }
 
+/// Initialise the bypass table from `cfg`: reads the per-method env
+/// var (`SOCKS5_DIRECT` / `SOCKS4_DIRECT` / `HTTP_DIRECT`) plus the
+/// catch-all `CONNECT_DIRECT` env var, both routed through
+/// `parameters::getparam` so `.connectrc` / `/etc/connectrc` are
+/// honoured. Then layers on local interface auto-add when `-D` is set.
+pub fn init_from_config(cfg: &Config) {
+    use crate::config::ProxyMethod;
+    let key = match cfg.relay_method {
+        ProxyMethod::Socks if cfg.socks_version == 5 => "SOCKS5_DIRECT",
+        ProxyMethod::Socks => "SOCKS4_DIRECT",
+        ProxyMethod::Http => "HTTP_DIRECT",
+        ProxyMethod::Telnet | ProxyMethod::Direct | ProxyMethod::Undecided => "",
+    };
+    let mut entries: Vec<String> = Vec::new();
+    if !key.is_empty()
+        && let Some(s) = crate::parameters::getparam(key)
+    {
+        entries.extend(s.split(',').map(str::to_string));
+    }
+    if let Some(s) = crate::parameters::getparam("CONNECT_DIRECT") {
+        entries.extend(s.split(',').map(str::to_string));
+    }
+    let auto = cfg.f_auto_direct;
+    match initialize(&entries, auto) {
+        Ok(n) if n > 0 => tracing::debug!(entries = n, "direct table loaded"),
+        Ok(_) => {}
+        Err(e) => tracing::error!("direct table: {e}"),
+    }
+}
+
 /// Add local network interface IPv4 addresses to the table.
 #[cfg(unix)]
 fn add_local_interfaces(table: &mut Vec<Entry>) -> usize {
@@ -232,6 +263,7 @@ pub fn check_direct(host: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{Config, ProxyMethod};
 
     #[test]
     fn parse_cidr_basic() {
@@ -298,5 +330,75 @@ mod tests {
         assert!(check_direct("allowed.example"));
         assert!(check_direct("anything.else"));
         assert!(!check_direct("blocked.example"));
+    }
+
+    /// `init_from_config` reads `SOCKS5_DIRECT` from the connectrc
+    /// table (via `parameters::getparam`) when env is unset. The
+    /// resulting CIDR entries are visible through `check_direct`.
+    /// Uses a key unique to this test so it doesn't race the parallel
+    /// `parameters::tests` that also poke `socks5_direct`.
+    #[test]
+    fn init_from_config_loads_socks5_direct_from_connectrc() {
+        // SAFETY: test owns SOCKS5_DIRECT during its run.
+        unsafe {
+            std::env::remove_var("SOCKS5_DIRECT");
+        }
+        // Pre-populate connectrc-style entry via TABLE.
+        let prev = crate::parameters::_insert_for_test("SOCKS5_DIRECT", "172.16.0.0/12");
+
+        let cfg = Config {
+            relay_method: ProxyMethod::Socks,
+            socks_version: 5,
+            ..Config::default()
+        };
+        init_from_config(&cfg);
+
+        assert!(check_direct("172.16.5.5"));
+        assert!(!check_direct("8.8.8.8"));
+
+        // Restore prior TABLE entry.
+        let mut t = crate::parameters::TABLE.lock().unwrap();
+        match prev {
+            Some(v) => {
+                t.insert("SOCKS5_DIRECT".into(), v);
+            }
+            None => {
+                t.remove("SOCKS5_DIRECT");
+            }
+        }
+    }
+
+    /// `CONNECT_DIRECT` is the per-method-catch-all: it should be
+    /// picked up regardless of which proxy method is configured. Pins
+    /// that the connectrc path applies uniformly across methods.
+    #[test]
+    fn init_from_config_connect_direct_applies_to_any_method() {
+        // SAFETY: test owns these env vars during its run.
+        unsafe {
+            std::env::remove_var("CONNECT_DIRECT");
+            std::env::remove_var("HTTP_DIRECT");
+            std::env::remove_var("SOCKS5_DIRECT");
+        }
+        let prev = crate::parameters::_insert_for_test("CONNECT_DIRECT", "100.0.0.0/8");
+
+        let cfg = Config {
+            relay_method: ProxyMethod::Http,
+            ..Config::default()
+        };
+        init_from_config(&cfg);
+
+        assert!(check_direct("100.5.6.7"));
+        assert!(!check_direct("8.8.8.8"));
+
+        // Restore prior TABLE entry.
+        let mut t = crate::parameters::TABLE.lock().unwrap();
+        match prev {
+            Some(v) => {
+                t.insert("CONNECT_DIRECT".into(), v);
+            }
+            None => {
+                t.remove("CONNECT_DIRECT");
+            }
+        }
     }
 }

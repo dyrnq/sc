@@ -160,6 +160,46 @@ mod tests {
         assert_eq!(pass, "secret-prompt");
     }
 
+    /// End-to-end for the new `getparam` wiring: when neither the
+    /// per-method env var nor the `CONNECT_USER` fallback is set, a
+    /// value pre-loaded into the file table (the same path `.connectrc`
+    /// uses) must surface as the proxy username.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn determine_relay_user_surfaces_connectrc_value() {
+        use std::sync::Mutex;
+        // Same lock as the LOGNAME/USER test to keep both from racing
+        // each other on the same env vars / TABLE entries.
+        static LOCK: Mutex<()> = Mutex::new(());
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        // SAFETY: this test owns these env vars during its run.
+        unsafe {
+            std::env::remove_var("SOCKS5_USER");
+            std::env::remove_var("SOCKS_USER");
+            std::env::remove_var("CONNECT_USER");
+            std::env::remove_var("LOGNAME");
+            std::env::remove_var("USER");
+        }
+        // Pre-populate the file table with a connectrc-style value
+        // for SOCKS5_USER. `getparam` will fall back to it.
+        let prev = crate::parameters::_insert_for_test("SOCKS5_USER", "from-connectrc");
+
+        let user = determine_relay_user(ProxyMethod::Socks, 5).unwrap();
+        assert_eq!(user.as_deref(), Some("from-connectrc"));
+
+        // Restore prior TABLE entry.
+        let mut t = crate::parameters::TABLE.lock().unwrap();
+        match prev {
+            Some(v) => {
+                t.insert("SOCKS5_USER".into(), v);
+            }
+            None => {
+                t.remove("SOCKS5_USER");
+            }
+        }
+    }
+
     /// `LOGNAME` / `USER` are part of the fallback chain after the
     /// per-method env vars but before `getlogin()`. Mirror connect.c.
     /// Use a mutex so we don't race the parallel integration tests in
