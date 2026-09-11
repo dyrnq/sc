@@ -32,7 +32,7 @@ pub fn parse_auth_list(spec: &str) -> Vec<u8> {
         let t = token.trim().to_ascii_lowercase();
         match t.as_str() {
             "none" | "noauth" | "no-auth" => out.push(handshake::method::NOAUTH),
-            "userpass" | "user-password" | "user/pasword" | "password" => {
+            "userpass" | "user-password" | "user/password" | "password" => {
                 out.push(handshake::method::USERPASS)
             }
             _ => {}
@@ -102,5 +102,19 @@ mod tests {
             vec![handshake::method::USERPASS]
         );
         assert!(parse_auth_list("gssapi,chap,unknown").is_empty());
+    }
+
+    /// All documented USERPASS spellings should map to the same method.
+    /// Regression guard: the "user/password" variant was once misspelled
+    /// as "user/pasword" in the source.
+    #[test]
+    fn parse_auth_list_userpass_aliases() {
+        for alias in ["userpass", "user-password", "user/password", "password"] {
+            assert_eq!(
+                parse_auth_list(alias),
+                vec![handshake::method::USERPASS],
+                "alias {alias:?} should map to USERPASS"
+            );
+        }
     }
 }
