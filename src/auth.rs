@@ -125,6 +125,13 @@ fn system_username() -> String {
 mod tests {
     use super::*;
 
+    /// Module-level mutex serialising tests that mutate the global
+    /// `parameters::TABLE` and shared env vars (`SOCKS5_USER`,
+    /// `SOCKS_USER`, `LOGNAME`, `USER`, etc.). Function-local `static
+    /// LOCK` declarations are *not* shared across functions, so each
+    /// test had its own lock and races were possible.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[cfg(unix)]
     #[tokio::test]
     async fn ssh_askpass_invokes_program() {
@@ -167,11 +174,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn determine_relay_user_surfaces_connectrc_value() {
-        use std::sync::Mutex;
-        // Same lock as the LOGNAME/USER test to keep both from racing
-        // each other on the same env vars / TABLE entries.
-        static LOCK: Mutex<()> = Mutex::new(());
-        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         // SAFETY: this test owns these env vars during its run.
         unsafe {
@@ -202,14 +205,12 @@ mod tests {
 
     /// `LOGNAME` / `USER` are part of the fallback chain after the
     /// per-method env vars but before `getlogin()`. Mirror connect.c.
-    /// Use a mutex so we don't race the parallel integration tests in
-    /// `tests/socks5.rs` over `SOCKS5_PASSWD`.
+    /// Shares `ENV_LOCK` with the connectrc test above so they cannot
+    /// race on the same `SOCKS5_USER` / `LOGNAME` / `USER` state.
     #[cfg(unix)]
     #[tokio::test]
     async fn determine_relay_user_falls_back_to_logname_user() {
-        use std::sync::Mutex;
-        static LOCK: Mutex<()> = Mutex::new(());
-        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         // SAFETY: this test owns these env vars during its run.
         unsafe {

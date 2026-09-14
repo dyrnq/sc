@@ -265,6 +265,12 @@ mod tests {
     use super::*;
     use crate::config::{Config, ProxyMethod};
 
+    /// Serialises the tests that call `initialize(...)` (which clears the
+    /// global `TABLE`) so they cannot interleave. Without this guard,
+    /// one test's `check_direct` assertion can observe another test's
+    /// table state when cargo runs them in parallel.
+    static TABLE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn parse_cidr_basic() {
         match parse_entry("10.0.0.0/8").unwrap() {
@@ -300,6 +306,7 @@ mod tests {
 
     #[test]
     fn initialize_then_check_direct() {
+        let _g = TABLE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         initialize(&["10.0.0.0/8".into(), "192.168.1.0/24".into()], false).unwrap();
         assert!(check_direct("10.0.0.1"));
         assert!(check_direct("192.168.1.42"));
@@ -311,6 +318,7 @@ mod tests {
     /// suffix so that `*.example.com` doesn't match `example.com` itself.
     #[test]
     fn check_direct_domain_match() {
+        let _g = TABLE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         initialize(&["example.com".into(), ".internal.corp".into()], false).unwrap();
         assert!(check_direct("example.com"));
         assert!(check_direct("EXAMPLE.COM"));
@@ -326,6 +334,7 @@ mod tests {
     /// is NOT in the table.
     #[test]
     fn check_direct_negative_domain() {
+        let _g = TABLE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         initialize(&["!blocked.example".into()], false).unwrap();
         assert!(check_direct("allowed.example"));
         assert!(check_direct("anything.else"));
@@ -339,6 +348,7 @@ mod tests {
     /// `parameters::tests` that also poke `socks5_direct`.
     #[test]
     fn init_from_config_loads_socks5_direct_from_connectrc() {
+        let _g = TABLE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // SAFETY: test owns SOCKS5_DIRECT during its run.
         unsafe {
             std::env::remove_var("SOCKS5_DIRECT");
@@ -373,6 +383,7 @@ mod tests {
     /// that the connectrc path applies uniformly across methods.
     #[test]
     fn init_from_config_connect_direct_applies_to_any_method() {
+        let _g = TABLE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // SAFETY: test owns these env vars during its run.
         unsafe {
             std::env::remove_var("CONNECT_DIRECT");

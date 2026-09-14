@@ -30,53 +30,42 @@ pub fn tty_readpass(prompt: &str) -> Result<String> {
 mod unix {
     use super::Result;
     use crate::error::Error;
+    use nix::sys::termios::{self, LocalFlags, SetArg};
+    use std::fs::File;
     use std::io::{Read, Write};
-    use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd};
 
     const TTY_PATH: &str = "/dev/tty";
 
     pub fn read(prompt: &str) -> Result<String> {
-        // Open /dev/tty.
-        let file = std::fs::OpenOptions::new()
+        let mut file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .open(TTY_PATH)
             .map_err(|e| Error::Config(format!("open {TTY_PATH}: {e}")))?;
-        // Detach the file from its OwnedFd and use a BorrowedFd for termios.
-        let raw = file.as_raw_fd();
-        let owned = unsafe { OwnedFd::from_raw_fd(file.into_raw_fd()) };
-        let borrowed: BorrowedFd<'_> = unsafe { BorrowedFd::borrow_raw(raw) };
-        let result = with_termios(borrowed, prompt);
-        // Close the fd via the OwnedFd.
-        drop(owned);
-        result
+        with_termios(&mut file, prompt)
     }
 
-    fn with_termios(fd: BorrowedFd<'_>, prompt: &str) -> Result<String> {
-        use nix::sys::termios::{self, SetArg, Termios};
-
-        let orig: Termios =
-            termios::tcgetattr(fd).map_err(|e| Error::Config(format!("tcgetattr: {e}")))?;
+    /// Disable echo, prompt, read one line, restore echo. One `&mut File`
+    /// owns the fd for its entire lifetime — matching connect.c's single-fd
+    /// pattern (no `OwnedFd` / `BorrowedFd` aliasing).
+    fn with_termios(file: &mut File, prompt: &str) -> Result<String> {
+        let orig =
+            termios::tcgetattr(&*file).map_err(|e| Error::Config(format!("tcgetattr: {e}")))?;
         let mut raw = orig.clone();
-        raw.local_flags &= !(termios::LocalFlags::ECHO
-            | termios::LocalFlags::ECHOE
-            | termios::LocalFlags::ECHOK
-            | termios::LocalFlags::ECHONL);
+        raw.local_flags &=
+            !(LocalFlags::ECHO | LocalFlags::ECHOE | LocalFlags::ECHOK | LocalFlags::ECHONL);
 
-        termios::tcsetattr(fd, SetArg::TCSANOW, &raw)
+        termios::tcsetattr(&*file, SetArg::TCSANOW, &raw)
             .map_err(|e| Error::Config(format!("tcsetattr: {e}")))?;
 
-        // Write prompt via a std::fs::File wrapping the raw fd.
-        let mut file = unsafe { std::fs::File::from_raw_fd(fd.as_raw_fd()) };
         let _ = file.write_all(prompt.as_bytes());
         let _ = file.flush();
 
-        // Read line byte-by-byte.
         let mut line = String::new();
         let mut byte = [0u8; 1];
         loop {
             match file.read(&mut byte) {
-                Ok(0) => break,
+                Ok(0) | Err(_) => break,
                 Ok(_) => {
                     if byte[0] == b'\n' {
                         break;
@@ -85,22 +74,13 @@ mod unix {
                         line.push(byte[0] as char);
                     }
                 }
-                Err(_) => break,
             }
         }
 
-        // Restore termios. The File still owns the fd.
-        let restore = termios::tcsetattr(fd, SetArg::TCSANOW, &orig);
-        // Detach the File so it closes the fd on drop.
-        std::mem::forget(file);
-        // The BorrowedFd `fd` is a view; its Drop is a no-op anyway.
-        let _ = fd;
-        restore.map_err(|e| Error::Config(format!("tcsetattr restore: {e}")))?;
+        termios::tcsetattr(&*file, SetArg::TCSANOW, &orig)
+            .map_err(|e| Error::Config(format!("tcsetattr restore: {e}")))?;
         Ok(line)
     }
-
-    #[allow(dead_code)]
-    fn _pin(_r: std::os::fd::RawFd) {}
 }
 
 // ---- Windows ----
@@ -155,5 +135,37 @@ mod windows {
             let _ = SetConsoleMode(h, orig_mode);
             Ok(line)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// When `/dev/tty` cannot be opened (no controlling terminal, or run
+    /// in a container without one), `tty_readpass` must surface a
+    /// Config-typed error rather than panicking. This pins the
+    /// open-failure path — the only path we can exercise without a real
+    /// TTY attached to the test harness.
+    #[cfg(unix)]
+    #[test]
+    fn tty_readpass_returns_err_when_dev_tty_unavailable() {
+        // Best-effort: if `/dev/tty` is actually openable (e.g. local dev
+        // machine), we cannot reliably exercise the failure path without
+        // risking a real read. Skip the test in that case.
+        if std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/tty")
+            .is_ok()
+        {
+            eprintln!("skipping: /dev/tty is openable on this host");
+            return;
+        }
+        let result = tty_readpass("prompt: ");
+        assert!(
+            matches!(result, Err(crate::error::Error::Config(_))),
+            "expected Config error from open failure, got {result:?}"
+        );
     }
 }
