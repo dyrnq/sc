@@ -11,7 +11,7 @@
 //! accepts — local EOF just closes the local socket, and the next accepted
 //! connection re-uses the same remote tunnel.
 
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 
 use crate::config::{Config, LocalType};
 use crate::error::{Error, Result};
@@ -73,21 +73,17 @@ async fn accept_loop_hold(listener: TcpListener, cfg: &Config) -> Result<()> {
         }
         .instrument(span)
         .await;
-        // If the remote side died (peek returns Err), give up. peek() waits
-        // for data so we use try_peek-style detection: check readiness via
-        // a non-blocking read with a 0-length buffer.
-        if !remote_alive(&mut remote).await {
-            break;
-        }
+        // Keep the remote tunnel across accepts. Match `connect.c`:
+        // there's no liveness probe between accepts — if the remote
+        // has died, the *next* relay() will surface the I/O error
+        // (read EOF or Io) and we exit the loop via the relay error
+        // path. A probe here is misleading: peek()/poll() blocks on
+        // an idle socket and reports "alive" regardless.
     }
+    // Loop only exits via `listener.accept()?` propagating, or via
+    // process termination; relay errors are logged, not returned.
+    #[allow(unreachable_code)]
     Ok(())
-}
-
-/// Detect whether the remote socket is still alive without blocking.
-async fn remote_alive(remote: &mut TcpStream) -> bool {
-    // A 0-byte peek should succeed immediately if the peer is still
-    // connected; it returns EOF (Ok(0)) if the peer closed.
-    remote.peek(&mut [0u8; 1]).await.is_ok()
 }
 
 /// Map `cfg.read_timeout_ms` to an `Option<Duration>` for the relay layer.
@@ -102,6 +98,7 @@ fn idle_timeout(cfg: &Config) -> Option<Duration> {
 mod tests {
     use super::*;
     use crate::config::{Config, LocalType, ProxyMethod};
+    use tokio::net::TcpStream;
 
     /// Verify that once-mode listen binds and accepts a TCP connection.
     /// We don't run the full relay here because the relay itself is covered
