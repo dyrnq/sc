@@ -86,12 +86,32 @@ pub async fn readpass(prompt: &str, method: ProxyMethod, socks_version: u8) -> R
 
 /// Spawn `SSH_ASKPASS` with `prompt` as its argv\[1\], read the first line
 /// of its stdout as the password.
+///
+/// Retry on `ETXTBSY` (os error 26): the kernel returns this when exec
+/// races with the inode's `MAP_DENYWRITE` release after a recent close,
+/// and the race has been observed in CI (the test that writes the
+/// script and immediately execs it hit it on shared ubuntu runners).
+/// A short retry resolves it without changing the surface behaviour.
 async fn ssh_askpass(prompt: &str, program: &str) -> Result<String> {
-    let output = tokio::process::Command::new(program)
-        .arg(prompt)
-        .output()
-        .await
-        .map_err(|e| Error::Auth(format!("SSH_ASKPASS spawn: {e}")))?;
+    const MAX_ATTEMPTS: u32 = 3;
+    let mut attempt = 0;
+    let output = loop {
+        attempt += 1;
+        match tokio::process::Command::new(program)
+            .arg(prompt)
+            .output()
+            .await
+        {
+            Ok(o) => break o,
+            Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) && attempt < MAX_ATTEMPTS => {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                continue;
+            }
+            Err(e) => {
+                return Err(Error::Auth(format!("SSH_ASKPASS spawn: {e}")));
+            }
+        }
+    };
     if !output.status.success() {
         return Err(Error::Auth(format!(
             "SSH_ASKPASS exited {:?}",
@@ -136,7 +156,11 @@ mod tests {
     #[tokio::test]
     async fn ssh_askpass_invokes_program() {
         // Create a tiny shell script that echoes its argv[1] on stdout.
-        let script = std::env::temp_dir().join("sc-askpass-test.sh");
+        // PID is part of the filename so concurrent CI runs on shared
+        // runners don't collide. Mirrors the pattern in
+        // `parameters::tests`.
+        let script =
+            std::env::temp_dir().join(format!("sc-askpass-{}-basic.sh", std::process::id()));
         std::fs::write(&script, "#!/bin/sh\necho \"$1\"\n").unwrap();
         std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
             .unwrap();
@@ -156,7 +180,8 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn ssh_askpass_strips_trailing_newline() {
-        let script = std::env::temp_dir().join("sc-askpass-crlf-test.sh");
+        let script =
+            std::env::temp_dir().join(format!("sc-askpass-{}-crlf.sh", std::process::id()));
         std::fs::write(&script, "#!/bin/sh\nprintf '%s\\r\\n' \"$1\"\n").unwrap();
         std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
             .unwrap();
