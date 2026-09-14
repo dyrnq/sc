@@ -184,56 +184,42 @@ pub fn init_from_config(cfg: &Config) {
 }
 
 /// Add local network interface IPv4 addresses to the table.
+///
+/// Uses `nix::ifaddrs::getifaddrs()` for the libc call and walks the
+/// returned `InterfaceAddress` iterator. Each entry's `address` /
+/// `netmask` are `Option<SockaddrStorage>`; we downcast to
+/// `SockaddrIn` via `as_sockaddr_in()`, which validates the address
+/// family and length before the cast — much safer than the previous
+/// raw `(sockaddr *) → (sockaddr_in *)` cast.
 #[cfg(unix)]
 fn add_local_interfaces(table: &mut Vec<Entry>) -> usize {
-    use std::ffi::CStr;
-
-    unsafe extern "C" {
-        fn getifaddrs(ifap: *mut *mut libc::ifaddrs) -> libc::c_int;
-        fn freeifaddrs(ifa: *mut libc::ifaddrs);
-    }
-
-    let mut ifap: *mut libc::ifaddrs = std::ptr::null_mut();
-    // SAFETY: getifaddrs writes a NULL or valid pointer to *ifap.
-    let r = unsafe { getifaddrs(&mut ifap) };
-    if r != 0 || ifap.is_null() {
-        return 0;
-    }
+    let addrs = match nix::ifaddrs::getifaddrs() {
+        Ok(it) => it,
+        Err(_) => return 0,
+    };
     let mut added = 0;
-    let mut cur = ifap;
-    while !cur.is_null() {
-        // SAFETY: cur is a valid pointer from getifaddrs.
-        let ifa = unsafe { &*cur };
-        if !ifa.ifa_addr.is_null() {
-            // SAFETY: ifa_addr is a valid sockaddr from the kernel.
-            let sa_family = unsafe { (*ifa.ifa_addr).sa_family };
-            if sa_family == libc::AF_INET as libc::sa_family_t && !ifa.ifa_netmask.is_null() {
-                let addr = unsafe {
-                    &*((ifa.ifa_addr as *const libc::sockaddr) as *const libc::sockaddr_in)
-                };
-                let mask = unsafe {
-                    &*((ifa.ifa_netmask as *const libc::sockaddr) as *const libc::sockaddr_in)
-                };
-                table.push(Entry::Cidr {
-                    addr: u32::from_be(addr.sin_addr.s_addr),
-                    mask: u32::from_be(mask.sin_addr.s_addr),
-                });
-                if !ifa.ifa_name.is_null() {
-                    // SAFETY: ifa_name is a valid C string.
-                    let name = unsafe { CStr::from_ptr(ifa.ifa_name) };
-                    tracing::debug!(
-                        iface = %name.to_string_lossy(),
-                        addr = %Ipv4Addr::from(u32::from_be(addr.sin_addr.s_addr)),
-                        "adding local interface to direct table",
-                    );
-                }
-                added += 1;
-            }
-        }
-        cur = ifa.ifa_next;
+    for ifaddr in addrs {
+        let (Some(addr_storage), Some(mask_storage)) = (ifaddr.address, ifaddr.netmask) else {
+            continue;
+        };
+        let (Some(sin_addr), Some(sin_mask)) =
+            (addr_storage.as_sockaddr_in(), mask_storage.as_sockaddr_in())
+        else {
+            continue;
+        };
+        let addr = sin_addr.ip();
+        let mask_ip = sin_mask.ip();
+        table.push(Entry::Cidr {
+            addr: u32::from(addr),
+            mask: u32::from(mask_ip),
+        });
+        tracing::debug!(
+            iface = %ifaddr.interface_name,
+            addr = %addr,
+            "adding local interface to direct table",
+        );
+        added += 1;
     }
-    // SAFETY: ifap was returned by getifaddrs.
-    unsafe { freeifaddrs(ifap) };
     added
 }
 
