@@ -131,6 +131,10 @@ pub struct Config {
     pub f_auto_direct: bool,
     pub connect_timeout: u32,
     pub read_timeout_ms: u64,
+    /// Upper bound on HTTP CONNECT 302/401/407 retries. A hostile or
+    /// misconfigured proxy that keeps issuing 302 in a cycle would
+    /// otherwise spin until the connect timeout fires. Default 5.
+    pub http_retry_max: u8,
     pub f_debug: u8,
 
     pub family: Family,
@@ -156,6 +160,7 @@ impl Default for Config {
             f_auto_direct: false,
             connect_timeout: 0,
             read_timeout_ms: 0,
+            http_retry_max: 5,
             f_debug: 0,
             family: Family::Any,
             telnet_command: None,

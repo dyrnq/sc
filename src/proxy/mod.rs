@@ -73,11 +73,23 @@ pub async fn open_through_proxy(cfg: &Config) -> Result<TcpStream> {
             ProxyMethod::Http => {
                 // HTTP has its own 302-redirect / 401-407 retry loop;
                 // each new CONNECT attempt re-enters connect_relay.
+                // A misbehaving proxy that loops on 302/407 would
+                // otherwise spin until connect_timeout fires — bound
+                // the iterations explicitly via `http_retry_max`.
+                let max = cfg.http_retry_max;
                 let mut s = connect_relay(&cfg).await?;
+                let mut attempts: u8 = 0;
                 loop {
                     match http::begin(&mut s, &mut cfg).await? {
                         http::HttpStart::Ok => break Ok(s),
                         http::HttpStart::Retry => {
+                            attempts += 1;
+                            if attempts > max {
+                                drop(s);
+                                return Err(Error::Config(format!(
+                                    "too many HTTP proxy redirects or auth challenges (max {max})"
+                                )));
+                            }
                             drop(s);
                             s = connect_relay(&cfg).await?;
                         }
@@ -226,6 +238,58 @@ mod tests {
         assert!(
             elapsed < Duration::from_secs(3),
             "kernel RST should be fast; got {elapsed:?}"
+        );
+    }
+
+    /// Regression test for issue #2: an HTTP proxy that loops 302s back
+    /// to itself must not spin forever. `open_through_proxy` should
+    /// bail with `Config("too many HTTP proxy redirects ...")` after
+    /// `http_retry_max` retries. The fake proxy here always redirects
+    /// to its own loopback address, so the dispatcher keeps reconnecting.
+    #[tokio::test]
+    async fn open_through_proxy_http_caps_302_redirect_loop() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // Always reply with 302 redirecting back to ourselves.
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut s, _)) = listener.accept().await else {
+                    break;
+                };
+                tokio::spawn(async move {
+                    use tokio::io::AsyncReadExt;
+                    let mut buf = vec![0u8; 1024];
+                    let _ = s.read(&mut buf).await;
+                    let body =
+                        format!("HTTP/1.0 302 Found\r\nLocation: //127.0.0.1:{port}/\r\n\r\n");
+                    let _ = tokio::io::AsyncWriteExt::write_all(&mut s, body.as_bytes()).await;
+                });
+            }
+        });
+
+        let cfg = Config {
+            relay_method: crate::config::ProxyMethod::Http,
+            relay_host: Some("127.0.0.1".into()),
+            relay_port: port,
+            dest_host: "example.com".into(),
+            dest_port: 443,
+            connect_timeout: 0,
+            http_retry_max: 2,
+            ..Config::default()
+        };
+        let start = Instant::now();
+        let result = open_through_proxy(&cfg).await;
+        let elapsed = start.elapsed();
+        match &result {
+            Err(Error::Config(m)) => assert!(
+                m.contains("too many HTTP proxy redirects"),
+                "expected retry-cap error, got {m:?}"
+            ),
+            other => panic!("expected retry-cap error, got {other:?}"),
+        }
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "retry cap should fire fast; got {elapsed:?}"
         );
     }
 }
