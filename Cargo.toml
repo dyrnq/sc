@@ -14,7 +14,7 @@ name = "sc"
 path = "src/lib.rs"
 
 [dependencies]
-tokio = { version = "1.40", features = ["net", "io-util", "io-std", "macros", "rt-multi-thread", "signal", "time", "sync", "process"] }
+tokio = { version = "1.53", features = ["net", "io-util", "io-std", "macros", "rt-multi-thread", "signal", "time", "sync", "process"] }
 thiserror = "2"
 base64 = "0.23"
 tracing = "0.1"
@@ -29,4 +29,4 @@ nix = { version = "0.31", features = ["term", "net", "feature", "signal"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock"] }
 
 [dev-dependencies]
-tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "test-util"] }
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "test-util"] }
