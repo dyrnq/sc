@@ -252,7 +252,7 @@ auto-loaded.
 `.github/workflows/ci.yml` runs on every push to `main` and on every
 pull request: `cargo fmt --check`, `cargo clippy -D warnings`, and a
 release build + unit-test run on each of `ubuntu-24.04`,
-`macos-14`, `windows-2022` (MSVC and GNU).
+`macos-15`, `windows-2022` (MSVC and GNU).
 
 `.github/workflows/release.yml` runs on every `v*` tag push (and is
 also dispatchable from the Actions UI). It builds the same matrix as

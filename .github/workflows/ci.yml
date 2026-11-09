@@ -52,8 +52,8 @@ jobs:
           - name: ubuntu-24.04
             os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-          - name: macos-14
-            os: macos-14
+          - name: macos-15
+            os: macos-15
             target: aarch64-apple-darwin
           - name: windows-msvc
             os: windows-2022
